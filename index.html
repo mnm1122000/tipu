@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>TIPU!</title>
+  <meta name="description" content="A bluffing card game for 2–10 phones. Lie about your cards. Get caught and you pull the trigger.">
+  <meta name="theme-color" content="#0c0708">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta property="og:title" content="TIPU! — liar's card game">
+  <meta property="og:description" content="Scan, sit, lie. Shout TIPU! when you smell a bluff. Losers spin the cylinder.">
+  <link rel="icon" href="assets/img/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/img/icon-180.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css?v=1">
+</head>
+<body>
+  <main id="app"><div id="screen"></div></main>
+  <div id="fx" aria-hidden="true"></div>
+  <div id="modal" aria-live="polite"></div>
+  <div id="toast" role="status"></div>
+  <div id="net" class="hidden"></div>
+  <input id="filePick" type="file" accept="image/*" hidden>
+  <input id="camPick" type="file" accept="image/*" capture="user" hidden>
+  <script src="vendor/mqtt.min.js"></script>
+  <script src="vendor/qrcode.js"></script>
+  <script type="module" src="js/app.js?v=1"></script>
+  <noscript>TIPU! needs JavaScript.</noscript>
+</body>
+</html>

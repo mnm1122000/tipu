@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TIPU! test bench</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0a0607; color: #fff; font: 14px/1.4 Inter, system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 14px; background: #1f0f11; border-bottom: 1px solid #ffffff22; position: sticky; top: 0; z-index: 5; }
+  header b { font-size: 18px; color: #ffd877; margin-right: 6px; }
+  header label { display: flex; gap: 6px; align-items: center; }
+  select, button { font: inherit; color: #fff; background: #ffffff18; border: 1px solid #ffffff33; border-radius: 10px; padding: 6px 10px; }
+  #status { color: #c9b5aa; }
+  main { display: flex; gap: 18px; padding: 14px; align-items: flex-start; flex-wrap: wrap; }
+  .slot { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .slot .tag { font-weight: 800; font-size: 13px; }
+  .slot .tag.host { color: #ffd877; font-size: 15px; }
+  .phone { width: 375px; height: 780px; border: 10px solid #222; border-radius: 34px; overflow: hidden; background: #000; box-shadow: 0 20px 50px #0008; }
+  .phone iframe { width: 375px; height: 780px; border: 0; display: block; }
+  .mini { width: calc(375px * var(--s)); height: calc(780px * var(--s)); border-width: 6px; border-radius: 22px; }
+  .mini iframe { transform: scale(var(--s)); transform-origin: 0 0; }
+  #players { display: flex; flex-wrap: wrap; gap: 12px; --s: .5; flex: 1; min-width: 300px; }
+</style>
+</head>
+<body>
+<header>
+  <b>TIPU! test bench</b>
+  <label>Players <select id="n"></select></label>
+  <label><input type="checkbox" id="auto" checked> Players play their own turns &amp; bet</label>
+  <label><input type="checkbox" id="autogun" checked> Players pull their own trigger</label>
+  <label>Size <select id="size"><option value=".38">Tiny</option><option value=".5" selected>Small</option><option value=".62">Medium</option><option value=".8">Large</option></select></label>
+  <button id="reset">↺ Reset</button>
+  <span id="status">You are the host (big phone). Tap <b>Host a table</b>, the players join by themselves.</span>
+</header>
+<main>
+  <div class="slot">
+    <div class="tag host">👑 YOU (host)</div>
+    <div class="phone"><iframe id="host" src="../index.html?slot=bench_host" allow="autoplay"></iframe></div>
+  </div>
+  <div id="players"></div>
+</main>
+<script>
+if (location.protocol === 'file:') {
+  document.body.innerHTML = '<div style="padding:30px;font:16px/1.6 sans-serif;color:#fff;max-width:640px">'
+    + '<h2 style="color:#ffd877">Open the bench through a web address</h2>'
+    + '<p>Browsers block this page when it is opened as a file. Use one of these:</p>'
+    + '<p>🌐 Online: <a style="color:#ffb36b" href="https://mnm1122000.github.io/tipu/tools/bench.html">https://mnm1122000.github.io/tipu/tools/bench.html</a></p>'
+    + '<p>💻 Local: run <code>node tools/serve.cjs 5192</code> then open <a style="color:#ffb36b" href="http://localhost:5192/tools/bench.html">http://localhost:5192/tools/bench.html</a></p></div>';
+  throw new Error('bench needs http(s)');
+}
+// The bench opens the real game in phone-sized frames. You drive the host phone.
+// When your table code appears, the player phones join on their own (?auto=1).
+const NAMES = ['Aina', 'Bob', 'Chloe', 'Dina', 'Eiman', 'Farah', 'Ganesh', 'Hana', 'Irfan'];
+const EMO = ['🦊', '🐼', '🐯', '🐸', '🦄', '🐙', '🤠', '👽', '🐧'];
+const $ = (s) => document.querySelector(s);
+$('#n').innerHTML = NAMES.map((_, i) => `<option ${i === 3 ? 'selected' : ''}>${i + 1}</option>`).join('');
+const hostDoc = () => $('#host').contentDocument;
+let joinedCode = null;
+
+function makePlayers(code) {
+  const box = $('#players');
+  box.innerHTML = '';
+  const n = Number($('#n').value);
+  if (n >= 6) { $('#size').value = '.38'; box.style.setProperty('--s', '.38'); }
+  for (let i = 0; i < n; i++) {
+    const slot = document.createElement('div');
+    slot.className = 'slot';
+    slot.innerHTML = `<div class="tag">${EMO[i]} ${NAMES[i]}</div><div class="phone mini"><iframe allow="autoplay" src="../index.html?join=${code}&slot=bench_p${i}&auto=1&name=${NAMES[i]}&emoji=${encodeURIComponent(EMO[i])}"></iframe></div>`;
+    box.appendChild(slot);
+  }
+  $('#status').textContent = `Table ${code}: ${n} players joining… then tap “Load the guns & deal” on your phone. ${n + 1} players total.`;
+}
+
+// watch the host phone for a table code
+setInterval(() => {
+  let code = null;
+  try { code = hostDoc().querySelector('.codebox .code')?.textContent?.trim(); } catch (_) {}
+  if (code && code !== joinedCode) { joinedCode = code; makePlayers(code); }
+}, 700);
+
+// tell every player phone whether it plays by itself
+setInterval(() => {
+  for (const f of document.querySelectorAll('#players iframe')) {
+    try {
+      const b = f.contentWindow.__bench;
+      if (!b) continue;
+      b.auto = $('#auto').checked;
+      b.autoGun = $('#autogun').checked;
+    } catch (_) {}
+  }
+}, 500);
+
+$('#reset').onclick = () => { joinedCode = null; $('#players').innerHTML = ''; $('#host').src = $('#host').src; $('#status').textContent = 'Tap Host a table on the big phone.'; };
+$('#size').onchange = () => { $('#players').style.setProperty('--s', $('#size').value); };
+$('#n').onchange = () => { if (joinedCode) $('#status').textContent = 'Player count changes on the next Reset.'; };
+</script>
+</body>
+</html>

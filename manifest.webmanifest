@@ -1,0 +1,16 @@
+{
+  "name": "TIPU! liar's card game",
+  "short_name": "TIPU!",
+  "description": "Lie about your cards. Get caught and you pull the trigger.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0c0708",
+  "theme_color": "#0c0708",
+  "icons": [
+    { "src": "assets/img/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/img/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/img/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
