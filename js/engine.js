@@ -5,10 +5,13 @@
 //
 // Scaled for up to 10 players:
 //  - the deck grows with the table: 5 cards per living player, same mix (30% each rank, 10% jokers)
+//  - every pull is a fresh spin: the chance is (your bullets) in 6, every time
 //  - guns hold 2 bullets on big tables (7+ players at the start) so the night doesn't last forever
+//  - wrongly accused 3 times (you told the truth): lose a bullet. Caught lying 3 times: gain a bullet
 //  - everybody who isn't in the call (alive or dead) bets LIE / TRUTH before the reveal — ghosts too
 //  - optional Devil card: caught on a call, everyone else at the table pulls their trigger
 //  - optional turn timer so ten people don't wait on one slow thinker
+//  - round twists: some rounds turns go counter-clockwise, anyone may shout TIPU!, or there are no Jokers
 
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 10;
@@ -18,11 +21,20 @@ export const RANKS = ['K', 'Q', 'A'];
 export const RANK_NAME = { K: 'King', Q: 'Queen', A: 'Ace', J: 'Joker', D: 'Devil' };
 export const RANK_PLURAL = { K: 'Kings', Q: 'Queens', A: 'Aces' };
 export const TIMERS = [0, 20, 30, 45];
+export const STREAK = 3;           // honest-when-called / caught-lying count that moves a bullet
+export const MIN_BULLETS = 1, MAX_BULLETS = 5;
 export const BET_MS = 5500;      // betting window after a TIPU! call
 export const FLIP_MS = 750;      // per revealed card
 export const VERDICT_MS = 2600;  // verdict stamp before the gun comes out
 export const GUN_MS = 75000;     // a shooter who stalls this long fires automatically
 export const AFTER_SHOT_MS = 3800;
+export const INTRO_GRACE = 4500;   // the round intro (deck counts) plays before the first turn
+export const TWISTS = {
+  reverse: { icon: '↺', name: 'Counter-clockwise', text: 'Turns go the other way round this round.' },
+  open: { icon: '📢', name: 'Anyone can call', text: 'Anyone at the table can shout TIPU! on the last play, not just the next player.' },
+  nojoker: { icon: '🚫', name: 'No Jokers', text: 'No Jokers in the deck this round. Only the real table card is true.' },
+};
+export const TWIST_CHANCE = 0.4;
 
 const rnd = (n) => {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
@@ -36,9 +48,9 @@ export function shuffle(a) {
 }
 
 // deck for n living players: 5n cards, ~10% jokers, the rest split evenly between K / Q / A
-export function deckMix(n, devil = false) {
+export function deckMix(n, devil = false, noJoker = false) {
   const total = HAND * n;
-  const jokers = Math.max(1, Math.round(total / 10)) - (devil ? 1 : 0);
+  const jokers = noJoker ? 0 : Math.max(1, Math.round(total / 10)) - (devil ? 1 : 0);
   const rest = total - jokers - (devil ? 1 : 0);
   const base = Math.floor(rest / 3);
   const mix = { K: base, Q: base, A: base, J: Math.max(0, jokers), D: devil ? 1 : 0 };
@@ -46,8 +58,8 @@ export function deckMix(n, devil = false) {
   for (const r of extra) mix[r]++;
   return mix;
 }
-export function buildDeck(n, devil = false) {
-  const mix = deckMix(n, devil);
+export function buildDeck(n, devil = false, noJoker = false) {
+  const mix = deckMix(n, devil, noJoker);
   const deck = [];
   let id = 1;
   for (const r of ['K', 'Q', 'A', 'J', 'D']) for (let i = 0; i < mix[r]; i++) deck.push({ id: id++, r });
@@ -60,11 +72,8 @@ export function bulletsFor(settings, startCount) {
   if (settings.bullets === 'auto') return startCount >= 7 ? 2 : 1;
   return Math.max(1, Math.min(3, Number(settings.bullets) || 1));
 }
-// chance the next pull fires, given pulls so far and bullets loaded
-export function oddsNext(pulls, bullets) {
-  const left = CHAMBERS - pulls;
-  return left <= 0 ? 1 : Math.min(1, bullets / left);
-}
+// chance a pull fires: a fresh spin every time, so it's simply bullets in 6
+export function oddsNext(bullets) { return Math.min(1, bullets / CHAMBERS); }
 
 export class Game {
   constructor(state) { this.s = state; this.events = []; }
@@ -72,15 +81,15 @@ export class Game {
   static create(code, host) {
     return new Game({
       code, hostId: host.id, phase: 'lobby', round: 0,
-      settings: { bullets: 'auto', timer: 30, devil: false, bets: true },
+      settings: { bullets: 'auto', timer: 30, devil: false, bets: true, twists: true },
       players: [Game.newPlayer(host)],
       table: null, turn: null, forced: false, lastPlay: null, pile: 0, deadline: 0,
       reveal: null, gun: null, starter: null, winner: null, deaths: [], log: [], bulletsEach: 1,
-      startCount: 0, seq: 0,
+      startCount: 0, seq: 0, mix: null, twist: null, dir: 1,
     });
   }
   static newPlayer({ id, name, emoji, bot }) {
-    return { id, name: String(name || 'Player').slice(0, 16), emoji: emoji || '🙂', bot: !!bot, alive: true, hand: [], pulls: 0, chambers: [], reads: 0, bets: 0 };
+    return { id, name: String(name || 'Player').slice(0, 16), emoji: emoji || '🙂', bot: !!bot, alive: true, hand: [], pulls: 0, bullets: 1, honest: 0, caught: 0, reads: 0, bets: 0, idle: 0 };
   }
 
   p(id) { return this.s.players.find((x) => x.id === id); }
@@ -90,15 +99,27 @@ export class Game {
   drainEvents() { const e = this.events; this.events = []; return e; }
   log(text) { this.s.log.push({ text, at: Date.now() }); if (this.s.log.length > 30) this.s.log.shift(); }
 
-  // next living player after `id` (seat order) matching `pred`
+  // next living player after `id` in the direction of play, matching `pred`
   nextAlive(id, pred = () => true) {
     const ps = this.s.players, n = ps.length;
     const i = this.idx(id);
+    const d = this.s.dir === -1 ? -1 : 1;
     for (let k = 1; k <= n; k++) {
-      const q = ps[(i + k + n) % n];
+      const q = ps[(i + d * k + n * 2) % n];
       if (q.alive && pred(q)) return q;
     }
     return null;
+  }
+
+  // put s.players in clockwise order of their seats on the virtual table (screen coords: y grows down)
+  orderBySeats() {
+    const s = this.s, seats = s.settings.seats || {};
+    const placed = s.players.filter((q) => seats[q.id]);
+    if (placed.length < 2) return;
+    const ang = (q) => { const [x, y] = seats[q.id]; return Math.atan2(y - 0.5, x - 0.5); };
+    const sorted = placed.slice().sort((a, b) => ang(a) - ang(b));
+    const rest = s.players.filter((q) => !seats[q.id]);
+    s.players = [...sorted, ...rest];
   }
 
   addPlayer(info) {
@@ -126,10 +147,30 @@ export class Game {
         if ('timer' in p && TIMERS.includes(p.timer)) s.settings.timer = p.timer;
         if ('devil' in p) s.settings.devil = !!p.devil;
         if ('bets' in p) s.settings.bets = !!p.bets;
+        if ('twists' in p) s.settings.twists = !!p.twists;
+        if ('shape' in p && ['round', 'long'].includes(p.shape)) s.settings.shape = p.shape;
+        return { ok: true };
+      }
+      case 'arrange': {
+        // host drags everyone to where they really sit. Turn order follows the seats clockwise.
+        if (!host || s.phase !== 'lobby' || !a.seats || typeof a.seats !== 'object') return { ok: false };
+        const seats = {};
+        for (const q of s.players) {
+          const v = a.seats[q.id];
+          if (Array.isArray(v) && v.length === 2 && v.every((x) => typeof x === 'number' && x >= 0 && x <= 1)) seats[q.id] = [+v[0].toFixed(3), +v[1].toFixed(3)];
+        }
+        s.settings.seats = seats;
+        this.orderBySeats();
+        return { ok: true };
+      }
+      case 'idle': {
+        const sc = Math.max(0, Math.min(999, Math.floor(Number(a.score) || 0)));
+        if (sc > (me.idle || 0)) { me.idle = sc; this.emit({ type: 'idle', pid, score: sc }); }
         return { ok: true };
       }
       case 'move': {
         if (!host || s.phase !== 'lobby') return { ok: false };
+        if (s.settings.seats) s.settings.seats = null;
         const i = this.idx(a.target), j = i + (a.dir < 0 ? -1 : 1);
         if (i < 0 || j < 0 || j >= s.players.length) return { ok: false };
         [s.players[i], s.players[j]] = [s.players[j], s.players[i]];
@@ -188,7 +229,7 @@ export class Game {
     s.bulletsEach = bulletsFor(s.settings, s.startCount);
     for (const p of s.players) {
       p.alive = true; p.hand = []; p.pulls = 0; p.reads = 0; p.bets = 0;
-      p.chambers = shuffle([0, 1, 2, 3, 4, 5]).slice(0, s.bulletsEach).sort();
+      p.bullets = s.bulletsEach; p.honest = 0; p.caught = 0;
     }
     s.round = 0; s.deaths = []; s.winner = null; s.log = [];
     s.starter = s.players[rnd(s.players.length)].id;
@@ -202,7 +243,15 @@ export class Game {
     const alive = this.alive();
     s.round++;
     s.table = RANKS[rnd(3)];
-    const deck = buildDeck(alive.length, s.settings.devil);
+    // round twist (not on the very first round, so everyone learns the basics first)
+    s.twist = null;
+    if (s.settings.twists && s.round > 1 && rnd(1000) < TWIST_CHANCE * 1000) {
+      const pool = Object.keys(TWISTS).filter((t) => t !== 'open' || alive.length > 2);
+      s.twist = pool[rnd(pool.length)];
+    }
+    s.dir = s.twist === 'reverse' ? -1 : 1;
+    s.mix = deckMix(alive.length, s.settings.devil, s.twist === 'nojoker');
+    const deck = buildDeck(alive.length, s.settings.devil, s.twist === 'nojoker');
     for (const p of s.players) p.hand = [];
     alive.forEach((p, i) => { p.hand = deck.slice(i * HAND, i * HAND + HAND); });
     s.phase = 'play';
@@ -210,12 +259,12 @@ export class Game {
     let st = this.p(s.starter);
     if (!st || !st.alive) st = this.nextAlive(s.starter) || alive[0];
     s.turn = st.id;
-    this.armTimer(now);
-    this.log(`Round ${s.round}: ${RANK_NAME[s.table]}'s table`);
-    this.emit({ type: 'deal', round: s.round, table: s.table, to: alive.map((p) => p.id), first: s.turn });
+    this.armTimer(now, INTRO_GRACE);
+    this.log(`Round ${s.round}: ${RANK_NAME[s.table]}'s table${s.twist ? ' · ' + TWISTS[s.twist].name : ''}`);
+    this.emit({ type: 'deal', round: s.round, table: s.table, to: alive.map((p) => p.id), first: s.turn, mix: s.mix, twist: s.twist });
   }
 
-  armTimer(now) { const t = this.s.settings.timer; this.s.deadline = t ? now + t * 1000 + 2500 : 0; }
+  armTimer(now, extra = 0) { const t = this.s.settings.timer; this.s.deadline = t ? now + t * 1000 + 2500 + extra : 0; }
 
   play(pid, ids, now) {
     const s = this.s;
@@ -246,9 +295,17 @@ export class Game {
     return this.s.players.filter((q) => q.id !== r.caller && q.id !== r.target);
   }
 
+  canCall(pid) {
+    const s = this.s;
+    const me = this.p(pid);
+    if (s.phase !== 'play' || !me || !me.alive || !s.lastPlay || s.lastPlay.by === pid) return false;
+    return s.turn === pid || s.twist === 'open';
+  }
+
   callLiar(pid, now) {
     const s = this.s;
-    if (s.phase !== 'play' || s.turn !== pid) return { ok: false, error: 'Not your turn.' };
+    if (s.phase !== 'play' || (s.turn !== pid && s.twist !== 'open')) return { ok: false, error: 'Not your turn.' };
+    if (!this.p(pid)?.alive) return { ok: false };
     const lp = s.lastPlay;
     if (!lp || lp.by === pid) return { ok: false, error: 'Nothing to call yet.' };
     const lie = lp.cards.some((c) => !isTrue(c, s.table));
@@ -270,15 +327,16 @@ export class Game {
     const g = s.gun;
     if (s.phase !== 'gun' || !g || !g.shooters.includes(pid) || pid in g.done) return { ok: false };
     const me = this.p(pid);
-    const dead = me.chambers.includes(me.pulls);
+    const dead = typeof me.live === 'boolean' ? me.live : rnd(CHAMBERS) < me.bullets;
     me.pulls++;
+    me.live = undefined;
     g.done[pid] = dead;
     if (dead) {
       me.alive = false;
       me.hand = [];
       s.deaths.push(pid);
       this.log(`💥 ${me.name} is dead`);
-    } else this.log(`*click* ${me.name} lives (${me.pulls}/${CHAMBERS})`);
+    } else this.log(`*click* ${me.name} lives`);
     this.emit({ type: 'shot', pid, dead, pull: me.pulls, auto });
     if (g.shooters.every((id) => id in g.done)) g.until = now + AFTER_SHOT_MS;
     return { ok: true };
@@ -293,7 +351,7 @@ export class Game {
   }
 
   // live view for the shooter: will their next pull fire? (sent only to them, so the bang is instant)
-  liveFor(pid) { const me = this.p(pid); return !!me && me.chambers.includes(me.pulls); }
+  liveFor(pid) { const me = this.p(pid); return !!me && !!me.live; }
 
   // ---------------------------------------------------------------- timers
   tick(now) {
@@ -317,12 +375,27 @@ export class Game {
         if (r.devil) shooters = this.alive().filter((q) => q.id !== r.target).map((q) => q.id);
         else shooters = [r.lie ? r.target : r.caller];
         r.shooters = shooters;
+        const t = this.p(r.target);
+        if (r.lie) {
+          t.caught++;
+          if (t.caught >= STREAK) {
+            t.caught = 0;
+            if (t.bullets < MAX_BULLETS) { t.bullets++; this.log(`🤥 ${t.name} caught lying ${STREAK} times: +1 bullet`); this.emit({ type: 'bullet', pid: t.id, delta: 1, bullets: t.bullets, why: 'caught' }); }
+          }
+        } else {
+          t.honest++;
+          if (t.honest >= STREAK) {
+            t.honest = 0;
+            if (t.bullets > MIN_BULLETS) { t.bullets--; this.log(`😇 ${t.name} told the truth ${STREAK} times when called: -1 bullet`); this.emit({ type: 'bullet', pid: t.id, delta: -1, bullets: t.bullets, why: 'honest' }); }
+          }
+        }
         this.log(r.devil ? `😈 The Devil card! Everyone else takes the gun` : r.lie ? `${this.p(r.target).name} lied` : `${this.p(r.target).name} told the truth`);
         this.emit({ type: 'verdict', lie: r.lie, devil: r.devil, shooters, target: r.target, caller: r.caller });
         return true;
       }
       if (r.stage === 'verdict') {
         s.phase = 'gun';
+        for (const id of r.shooters) { const q = this.p(id); q.live = rnd(CHAMBERS) < q.bullets; }
         s.gun = { shooters: r.shooters, done: {}, until: now + GUN_MS, devil: r.devil };
         this.emit({ type: 'gun', shooters: r.shooters });
         return true;
@@ -369,7 +442,8 @@ export class Game {
     return {
       code: s.code, hostId: s.hostId, phase: s.phase, round: s.round, settings: s.settings,
       minPlayers: MIN_PLAYERS, maxPlayers: MAX_PLAYERS, bulletsEach: s.bulletsEach,
-      table: s.table, turn: s.turn, forced: s.forced, pile: s.pile,
+      table: s.table, turn: s.turn, forced: s.forced, pile: s.pile, mix: s.mix, twist: s.twist, dir: s.dir || 1,
+      canCall: this.canCall(pid),
       deadline: s.deadline ? s.deadline - Date.now() : 0,
       lastPlay: s.lastPlay ? { by: s.lastPlay.by, n: s.lastPlay.n } : null,
       reveal: r ? {
@@ -382,7 +456,7 @@ export class Game {
       winner: s.winner, deaths: s.deaths,
       players: s.players.map((q) => ({
         id: q.id, name: q.name, emoji: q.emoji, bot: q.bot, alive: q.alive, count: q.hand.length,
-        pulls: q.pulls, reads: q.reads, bets: q.bets,
+        pulls: q.pulls, reads: q.reads, bets: q.bets, bullets: q.bullets, honest: q.honest, caught: q.caught, idle: q.idle || 0,
       })),
       me: {
         hand: me.hand,

@@ -83,6 +83,7 @@ function sideGunSVG() {
         <rect x="318" y="144" width="152" height="150" fill="url(#gCyl)"/>
         <g class="g-flutes">${flutes.join('')}</g>
         <rect x="318" y="144" width="152" height="150" fill="url(#gCyl)" opacity=".18"/>
+        <rect class="g-cylblur" x="318" y="144" width="152" height="150" fill="url(#gCyl)" opacity="0"/>
       </g>
       <path d="M326 150 L326 288 M462 150 L462 288" stroke="rgba(0,0,0,.55)" stroke-width="4"/>
     </g>
@@ -106,9 +107,11 @@ function rearCylSVG() {
   for (let k = 0; k < 6; k++) {
     const a = (k * 60 - 90) * Math.PI / 180;
     const x = (120 * Math.cos(a)).toFixed(1), y = (120 * Math.sin(a)).toFixed(1);
-    ch.push(`<g transform="translate(${x} ${y})"><circle r="50" fill="#030405"/><circle r="45" fill="url(#rBrass)" stroke="#5a3e0e" stroke-width="3"/>
+    ch.push(`<g class="ch" data-k="${k}" transform="translate(${x} ${y})"><circle r="50" fill="#030405"/>
+      <circle r="42" fill="#0d1014" stroke="#2b333e" stroke-width="3"/><circle r="30" fill="#050608"/>
+      <g class="rd"><circle r="45" fill="url(#rBrass)" stroke="#5a3e0e" stroke-width="3"/>
       <circle r="35" fill="none" stroke="rgba(90,62,14,.7)" stroke-width="2"/><circle r="13" fill="url(#rPrimer)" stroke="#6b5a3a" stroke-width="2"/>
-      <text y="-21" font-size="10" text-anchor="middle" fill="rgba(70,45,5,.75)" font-family="Inter, sans-serif" font-weight="800">.38</text></g>`);
+      <text y="-21" font-size="10" text-anchor="middle" fill="rgba(70,45,5,.75)" font-family="Inter, sans-serif" font-weight="800">.38</text></g></g>`);
   }
   const flutes = [];
   for (let k = 0; k < 6; k++) {
@@ -128,7 +131,7 @@ function rearCylSVG() {
     </radialGradient>
     <mask id="rMask"><rect x="-240" y="-240" width="480" height="480" fill="#fff"/>${flutes.join('')}</mask>
   </defs>
-  <g class="r-spin">
+  <g class="r-body">
     <circle r="206" fill="#020305" mask="url(#rMask)"/>
     <circle r="200" fill="url(#rSteel)" mask="url(#rMask)"/>
     <circle r="186" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="3" mask="url(#rMask)"/>
@@ -137,23 +140,27 @@ function rearCylSVG() {
     <path d="M0 -26 L8 -8 L26 0 L8 8 L0 26 L-8 8 L-26 0 L-8 -8 Z" fill="#11161d"/>
     <circle r="7" fill="#7d8898"/>
   </g>
-  <path d="M-16 -226 L16 -226 L0 -206 Z" fill="#ff3b3b"/>
+  <g class="r-drag" style="display:none"><circle r="45" fill="url(#rBrass)" stroke="#5a3e0e" stroke-width="3"/><circle r="13" fill="url(#rPrimer)"/></g>
 </svg>`;
 }
 
 // ---------------------------------------------------------------- component
 export class Revolver {
-  // opts: { watch, name, pulls, bullets, live, onFire(), onStream(state), onDone() }
+  // opts: { watch, name, pulls, bullets, live, extra, onFire(), onStream(state), onResult(dead) }
+  // stages: load (cylinder out: see / move the bullets) → closing → closed (full-screen gun:
+  // spin the cylinder, cock, pull) → fired → result
   constructor(opts) {
     this.o = opts;
     this.watch = !!opts.watch;
-    this.stage = 'open';    // open → closing → closed → fired → result
-    this.angle = Math.random() * 360; this.w = 0; this.snapTo = null;
-    this.hammer = 0;        // 0..1 (1 = cocked)
+    this.stage = 'load';
+    const n = Math.max(1, Math.min(5, opts.bullets || 1));
+    this.slots = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5).slice(0, n).sort();
+    this.cyl = 0; this.cw = 0;   // side-view cylinder offset (gun units) and spin speed (units/s)
+    this.hammer = 0;             // 0..1 (1 = cocked)
     this.cocked = false;
-    this.trig = 0;          // 0..1
-    this.flute = 0;         // side-view chamber offset (px in gun units)
-    this.live = opts.live;  // true / false / null (unknown yet)
+    this.trig = 0;               // 0..1
+    this.extra = 0;              // extra cylinder turn from the trigger (double action) or cocking
+    this.live = opts.live;       // true / false / null (unknown yet)
     this.result = null;
     this.lastTickIdx = null; this.lastTickAt = 0;
     this.lastStream = 0; this.streamKey = '';
@@ -173,10 +180,12 @@ export class Revolver {
         <div class="g-odds">${this.oddsHTML()}</div>
         ${o.extra ? `<div class="g-extra">${o.extra}</div>` : ''}
       </div>
-      <div class="g-cylwrap"><div class="g-blur"></div>${rearCylSVG()}</div>
+      <div class="g-cylwrap"><div class="g-load">${this.loadText()}</div>${rearCylSVG()}</div>
       <div class="g-gunwrap">${sideGunSVG()}</div>
       <div class="g-hint"></div>
-      <div class="g-btns">${this.watch ? '' : '<button class="g-btn" data-g="spin">↻ Spin</button><button class="g-btn hot" data-g="close">⤵ Snap it shut</button>'}</div>
+      <div class="g-btns g-btns-load">${this.watch ? '' : '<button class="g-btn hot" data-g="close">⤵ Load the gun</button>'}</div>
+      <div class="g-btns g-btns-spin">${this.watch ? '' : '<button class="g-btn" data-g="spin">↻ Spin it</button>'}</div>
+      <div class="g-cue g-cue-spin"><span>SPIN ⇆</span></div>
       <div class="g-cue g-cue-trig"><span>PULL</span><i></i></div>
       <div class="g-cue g-cue-ham"><span>COCK</span><i></i></div>
       <svg class="g-crack" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
@@ -187,10 +196,11 @@ export class Revolver {
     document.body.appendChild(el);
     this.el = el;
     this.q = (s) => el.querySelector(s);
-    this.rear = this.q('.g-rear'); this.spinG = this.q('.r-spin');
+    this.rear = this.q('.g-rear');
     this.side = this.q('.g-side'); this.gunwrap = this.q('.g-gunwrap'); this.cylwrap = this.q('.g-cylwrap');
     this.hamG = this.q('.g-hammer'); this.trigG = this.q('.g-trigger'); this.flutesG = this.q('.g-flutes'); this.flashG = this.q('.g-flash');
-    this.blurEl = this.q('.g-blur');
+    this.blurEl = this.q('.g-cylblur');
+    this.paintSlots();
     this.setHint();
     this.layout();
     this.onResize = () => this.layout();
@@ -205,7 +215,7 @@ export class Revolver {
       const b = e.target.closest('[data-g]');
       if (!b) return;
       e.stopPropagation();
-      if (b.dataset.g === 'spin') this.flick((Math.random() < 0.5 ? -1 : 1) * (1400 + Math.random() * 900));
+      if (b.dataset.g === 'spin') this.flick((Math.random() < 0.5 ? -1 : 1) * (1500 + Math.random() * 900));
       if (b.dataset.g === 'close') this.close();
       if (b.dataset.g === 'hide') this.el.classList.toggle('mini');
     });
@@ -220,41 +230,52 @@ export class Revolver {
 
   oddsHTML() {
     const { pulls = 0, bullets = 1 } = this.o;
-    const left = 6 - pulls;
-    const dots = Array.from({ length: 6 }, (_, i) => `<span class="${i < pulls ? 'used' : i === pulls ? 'now' : ''}"></span>`).join('');
-    const odds = left <= bullets ? 'certain death' : `${bullets} in ${left}`;
-    return `<div class="g-dots">${dots}</div><div class="g-pct">Pull ${pulls + 1} of 6 · <b>${odds}</b>${bullets > 1 ? ` · ${bullets} bullets` : ''}</div>`;
+    const dots = Array.from({ length: 6 }, (_, i) => `<span class="${i < bullets ? 'now' : ''}"></span>`).join('');
+    return `<div class="g-dots">${dots}</div><div class="g-pct">Pull #${pulls + 1} · <b>${bullets} in 6</b> chance</div>`;
+  }
+  loadText() {
+    const b = this.o.bullets || 1;
+    return `<b>${b} bullet${b > 1 ? 's' : ''}</b> in 6 chambers`;
   }
 
   setHint() {
     const h = this.q('.g-hint');
     if (!h) return;
     const map = this.watch ? {
-      open: 'Spinning the cylinder…', closing: '', closed: 'Finger on the trigger…', fired: '', result: '',
+      load: 'Loading the gun…', closing: '', closed: 'Spinning… finger on the trigger…', fired: '', result: '',
     } : {
-      open: 'Flick the bullets to spin · swipe down to snap it shut',
+      load: 'Drag a bullet to another chamber if you like · swipe down to load',
       closing: '',
-      closed: this.cocked ? 'Cocked. Press the trigger and pull it ↓' : 'Hold the trigger and pull it ↓ · or drag the hammer back first',
+      closed: this.cocked ? 'Cocked. Press the trigger and pull it ↓' : 'Swipe across the cylinder to spin it · hold the trigger and pull ↓',
       fired: '', result: '',
     };
     h.textContent = map[this.stage] || '';
     this.el.classList.toggle('cocked', this.cocked);
+    this.el.classList.toggle('closed', ['closed', 'fired', 'result'].includes(this.stage));
+  }
+
+  paintSlots() {
+    for (const g of this.rear.querySelectorAll('.ch')) {
+      const k = Number(g.dataset.k);
+      g.querySelector('.rd').style.display = this.slots.includes(k) ? '' : 'none';
+      g.classList.toggle('pick', this.pick === k);
+    }
   }
 
   // where things go on screen
   layout() {
     const W = innerWidth, H = innerHeight;
     const g = this.gunwrap;
-    if (this.stage === 'open' || this.stage === 'closing') {
+    if (this.stage === 'load' || this.stage === 'closing') {
       const gw = Math.min(W * 0.94, 520);
       this.scale = gw / VB_W;
       this.rot = false;
       g.style.width = gw + 'px'; g.style.height = gw * VB_H / VB_W + 'px';
       g.style.transform = `translate(-50%, -50%)`;
       g.style.top = Math.min(H * 0.74, H - gw * VB_H / VB_W / 2 - 70) + 'px';
-      const cs = Math.min(W * 0.78, H * 0.42, 380);
+      const cs = Math.min(W * 0.78, H * 0.4, 380);
       this.cylwrap.style.width = this.cylwrap.style.height = cs + 'px';
-      this.cylwrap.style.top = Math.max(120, H * 0.36) + 'px';
+      this.cylwrap.style.top = Math.max(150, H * 0.38) + 'px';
     } else {
       // the gun stands up: barrel to the top of the phone, it fills the screen
       const len = Math.min(H * 0.80, W * 0.9 * VB_W / VB_H);
@@ -267,50 +288,67 @@ export class Revolver {
     this.placeCues();
   }
 
-  // screen position of a point in gun units
   toScreen(x, y) {
     const r = this.gunwrap.getBoundingClientRect();
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     const lx = (x - VB_W / 2) * this.scale, ly = (y - VB_H / 2) * this.scale;
     return this.rot ? { x: cx + ly, y: cy - lx } : { x: cx + lx, y: cy + ly };
   }
-  // gun units of a screen point
   toGun(px, py) {
     const r = this.gunwrap.getBoundingClientRect();
     const dx = px - (r.left + r.width / 2), dy = py - (r.top + r.height / 2);
     const lx = this.rot ? -dy : dx, ly = this.rot ? dx : dy;
     return { x: VB_W / 2 + lx / this.scale, y: VB_H / 2 + ly / this.scale };
   }
-  // screen direction of "rearward" (pulling the trigger / hammer back)
   pullDir() { return this.rot ? { x: 0, y: 1 } : { x: -1, y: 0 }; }
+  // screen direction of the cylinder's surface moving (gun y axis)
+  spinDir() { return this.rot ? { x: 1, y: 0 } : { x: 0, y: 1 }; }
 
   placeCues() {
     const show = this.stage === 'closed' && !this.watch;
-    const t = this.q('.g-cue-trig'), h = this.q('.g-cue-ham');
+    const t = this.q('.g-cue-trig'), h = this.q('.g-cue-ham'), sp = this.q('.g-cue-spin');
     if (!t) return;
     t.classList.toggle('on', show && this.trig < 0.05);
     h.classList.toggle('on', show && !this.cocked && this.trig < 0.05);
+    sp.classList.toggle('on', show && !this.spun && this.trig < 0.05);
     if (!show) return;
     setTimeout(() => {
       if (!this.el) return;
-      const a = this.toScreen(372, 350), b = this.toScreen(246, 100);
+      const a = this.toScreen(372, 350), b = this.toScreen(246, 100), c = this.toScreen(394, 219);
       const cx = (x) => Math.max(46, Math.min(innerWidth - 46, x));
       t.style.left = cx(a.x + 62) + 'px'; t.style.top = a.y + 'px';
       h.style.left = cx(b.x + 8) + 'px'; h.style.top = b.y + 62 + 'px';
-    }, 600);
+      sp.style.left = cx(c.x - 78) + 'px'; sp.style.top = c.y + 'px';
+    }, 650);
   }
 
   // ------------------------------------------------------------ input
+  rearPt(e) {
+    const m = this.rear.getScreenCTM();
+    if (!m) return { x: 0, y: 0 };
+    const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+    return { x: p.x, y: p.y };
+  }
+  chamberAt(p) {
+    for (let k = 0; k < 6; k++) {
+      const a = (k * 60 - 90) * Math.PI / 180;
+      if (Math.hypot(p.x - 120 * Math.cos(a), p.y - 120 * Math.sin(a)) < 58) return k;
+    }
+    return -1;
+  }
+
   down(e) {
     if (e.target.closest('[data-g]')) return;
     const st = this.stage;
-    if (st === 'open') {
-      const r = this.rear.getBoundingClientRect();
-      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-      const d = Math.hypot(e.clientX - cx, e.clientY - cy);
-      if (d < r.width * 0.55) {
-        this.drag = { kind: 'spin', cx, cy, a0: Math.atan2(e.clientY - cy, e.clientX - cx), ang0: this.angle, hist: [{ t: performance.now(), a: this.angle }], x0: e.clientX, y0: e.clientY };
-        this.w = 0; this.snapTo = null;
+    if (st === 'load') {
+      const p = this.rearPt(e);
+      const k = this.chamberAt(p);
+      if (k >= 0 && this.slots.includes(k)) {
+        this.drag = { kind: 'bullet', from: k, x0: e.clientX, y0: e.clientY, moved: false };
+        sfx.play('click'); vibrate(8);
+      } else if (k >= 0 && this.pick != null) {
+        this.moveBullet(this.pick, k); this.pick = null; this.paintSlots();
+        this.drag = null;
       } else this.drag = { kind: 'swipe', x0: e.clientX, y0: e.clientY, t0: performance.now() };
       this.el.setPointerCapture?.(e.pointerId);
       return;
@@ -318,32 +356,45 @@ export class Revolver {
     if (st === 'closed') {
       const p = this.toGun(e.clientX, e.clientY);
       const dH = Math.hypot(p.x - 252, p.y - 110), dT = Math.hypot(p.x - 368, p.y - 345);
+      const onCyl = p.x > 300 && p.x < 490 && p.y > 120 && p.y < 300;
       if (dH < 90 && !this.cocked && dH < dT) this.drag = { kind: 'hammer', x0: e.clientX, y0: e.clientY, moved: false };
-      else if (dT < 150 || (p.y > 280 && p.x < 470 && p.x > 150)) {
+      else if (onCyl && this.trig < 0.05) {
+        this.drag = { kind: 'cyl', last: this.spinAlong(e), hist: [{ t: performance.now(), c: this.cyl }] };
+        this.cw = 0;
+      } else if (dT < 150 || (p.y > 280 && p.x < 470 && p.x > 150)) {
         this.drag = { kind: 'trigger', x0: e.clientX, y0: e.clientY };
+        this.cw = 0; this.snapCyl();
         vibrate(10);
       } else this.drag = null;
       if (this.drag) this.el.setPointerCapture?.(e.pointerId);
     }
   }
+  spinAlong(e) { const d = this.spinDir(); return (e.clientX * d.x + e.clientY * d.y) / this.scale; }
   move(e) {
     const d = this.drag;
     if (!d) return;
-    if (d.kind === 'spin') {
-      const a = Math.atan2(e.clientY - d.cy, e.clientX - d.cx);
-      let delta = (a - d.a0) * 180 / Math.PI;
-      d.a0 = a;
-      if (delta > 180) delta -= 360; if (delta < -180) delta += 360;
-      this.angle += delta;
-      const now = performance.now();
-      d.hist.push({ t: now, a: this.angle });
-      while (d.hist.length > 2 && now - d.hist[0].t > 90) d.hist.shift();
-      // a mostly-downward drag that started on the cylinder also closes it
-      if (e.clientY - d.y0 > 140 && Math.abs(e.clientX - d.x0) < 60) { this.drag = null; this.close(); }
+    if (d.kind === 'bullet') {
+      d.moved = d.moved || Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 8;
+      if (!d.moved) return;
+      const p = this.rearPt(e);
+      const ghost = this.rear.querySelector('.r-drag');
+      ghost.style.display = '';
+      ghost.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(1.12)`);
+      this.rear.querySelector(`.ch[data-k="${d.from}"] .rd`).style.display = 'none';
       return;
     }
     if (d.kind === 'swipe') {
       if (e.clientY - d.y0 > 70 && Math.abs(e.clientY - d.y0) > Math.abs(e.clientX - d.x0) * 1.3) { this.drag = null; this.close(); }
+      return;
+    }
+    if (d.kind === 'cyl') {
+      const now = this.spinAlong(e);
+      this.cyl += now - d.last;
+      d.last = now;
+      this.spun = true;
+      const t = performance.now();
+      d.hist.push({ t, c: this.cyl });
+      while (d.hist.length > 2 && t - d.hist[0].t > 90) d.hist.shift();
       return;
     }
     const dir = this.pullDir();
@@ -358,10 +409,9 @@ export class Revolver {
     if (d.kind === 'trigger') {
       const need = this.cocked ? PULL_SA : PULL_DA;
       const p = clamp(units / need, 0, 1);
-      const step = Math.floor(p * 5);
-      if (step > Math.floor(this.trig * 5)) vibrate(6);
+      if (Math.floor(p * 5) > Math.floor(this.trig * 5)) vibrate(6);
       this.trig = p;
-      if (!this.cocked) { this.hammer = p * 0.92; this.flute = this.fluteBase() + p * FLUTE_PITCH; }
+      if (!this.cocked) { this.hammer = p * 0.92; this.extra = p * FLUTE_PITCH; }
       if (p >= 1) { this.drag = null; this.fire(); }
     }
   }
@@ -369,22 +419,31 @@ export class Revolver {
     const d = this.drag;
     this.drag = null;
     if (!d) return;
-    if (d.kind === 'spin') {
-      const h = d.hist;
-      if (h.length >= 2) {
-        const a = h[0], b = h[h.length - 1];
-        const dt = (b.t - a.t) / 1000;
-        if (dt > 0.005) this.flick(((b.a - a.a) / dt) * 1.05);
-      }
+    if (d.kind === 'bullet') {
+      this.rear.querySelector('.r-drag').style.display = 'none';
+      if (!d.moved) { this.pick = this.pick === d.from ? null : d.from; this.paintSlots(); return; }
+      const k = this.chamberAt(this.rearPt(e));
+      if (k >= 0 && !this.slots.includes(k)) this.moveBullet(d.from, k);
+      this.paintSlots();
       return;
     }
     if (d.kind === 'swipe') {
       const dt = performance.now() - d.t0;
       if (!cancelled && dt < 250 && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 10) {
-        // a tap on the gun closes it too
         const r = this.gunwrap.getBoundingClientRect();
         if (e.clientY > r.top - 20) this.close();
       }
+      return;
+    }
+    if (d.kind === 'cyl') {
+      const h = d.hist;
+      if (h.length >= 2) {
+        const a = h[0], b = h[h.length - 1];
+        const dt = (b.t - a.t) / 1000;
+        if (dt > 0.005) this.flick(((b.c - a.c) / dt) * 1.1);
+      }
+      if (Math.abs(this.cw) < 60) this.snapCyl();
+      this.placeCues();
       return;
     }
     if (d.kind === 'hammer') {
@@ -395,22 +454,32 @@ export class Revolver {
     if (d.kind === 'trigger' && this.stage === 'closed') this.springTrigger();
   }
 
-  flick(w) {
-    if (this.stage !== 'open') return;
-    this.w = clamp(w, -3600, 3600);
-    this.snapTo = null;
-    if (Math.abs(this.w) > 300) { sfx.play('spin', { vol: Math.min(0.35, Math.abs(this.w) / 6000) }); vibrate(12); }
+  moveBullet(from, to) {
+    if (from === to || this.slots.includes(to)) return;
+    this.slots = this.slots.map((k) => (k === from ? to : k)).sort();
+    sfx.play('cock'); vibrate(14);
+    this.stream(true);
   }
 
-  fluteBase() { return this.cocked ? FLUTE_PITCH : 0; }
+  flick(w) {
+    if (this.stage !== 'closed' || this.trig > 0.05) return;
+    this.cw = clamp(w, -4200, 4200);
+    this.spun = true;
+    this.placeCues();
+    if (Math.abs(this.cw) > 300) { sfx.play('spin', { vol: Math.min(0.35, Math.abs(this.cw) / 7000) }); vibrate(12); }
+  }
+  snapCyl() {
+    const to = Math.round(this.cyl / FLUTE_PITCH) * FLUTE_PITCH;
+    this.snapTo = to;
+  }
 
   cock() {
     if (this.cocked || this.stage !== 'closed') return;
     this.cocked = true;
     this.hammer = 1;
-    const from = this.flute, to = FLUTE_PITCH;
-    const t0 = performance.now();
-    const step = () => { const k = Math.min(1, (performance.now() - t0) / 120); this.flute = from + (to - from) * k; if (k < 1) requestAnimationFrame(step); };
+    this.cw = 0; this.snapCyl();
+    const t0 = performance.now(), from = this.extra;
+    const step = () => { const k = Math.min(1, (performance.now() - t0) / 120); this.extra = from + (FLUTE_PITCH - from) * k; if (k < 1) requestAnimationFrame(step); };
     step();
     sfx.play('cock'); vibrate([18, 90, 22]);
     this.setHint(); this.placeCues();
@@ -421,20 +490,21 @@ export class Revolver {
     step();
   }
   springTrigger() {
-    const from = this.trig, fromH = this.hammer, fromF = this.flute, t0 = performance.now();
+    const from = this.trig, fromH = this.hammer, fromX = this.extra, t0 = performance.now();
     const step = () => {
       if (this.stage !== 'closed') return;
       const k = Math.min(1, (performance.now() - t0) / 160);
       this.trig = from * (1 - k);
-      if (!this.cocked) { this.hammer = fromH * (1 - k); this.flute = fromF + (this.fluteBase() - fromF) * k; }
+      if (!this.cocked) { this.hammer = fromH * (1 - k); this.extra = fromX * (1 - k); }
       if (k < 1) requestAnimationFrame(step); else this.placeCues();
     };
     step();
   }
 
   close() {
-    if (this.stage !== 'open') return;
+    if (this.stage !== 'load') return;
     this.stage = 'closing';
+    this.pick = null;
     this.setHint();
     this.el.classList.remove('open');
     const sideCyl = this.q('.g-cylside').getBoundingClientRect();
@@ -442,19 +512,18 @@ export class Revolver {
     const dx = sideCyl.left + sideCyl.width / 2 - (cr.left + cr.width / 2);
     const dy = sideCyl.top + sideCyl.height / 2 - (cr.top + cr.height / 2);
     const k = sideCyl.height / cr.height;
+    sfx.play('spin', { vol: 0.15 });
     const a = this.cylwrap.animate([
       { transform: 'translate(-50%, -50%)', opacity: 1 },
-      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(${k}) rotateY(70deg)`, opacity: 0.2 },
-    ], { duration: 330, easing: 'cubic-bezier(.5,0,.9,.5)', fill: 'forwards' });
+      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(${k}) rotateY(70deg) rotate(200deg)`, opacity: 0.2 },
+    ], { duration: 360, easing: 'cubic-bezier(.5,0,.9,.5)', fill: 'forwards' });
     a.onfinish = () => {
       if (!this.el) return;
-      this.el.classList.add('closed');
+      this.stage = 'closed';
+      this.setHint();
       sfx.play('close'); vibrate(45);
       this.gunwrap.animate([{ filter: 'brightness(2)' }, { filter: 'none' }], { duration: 220 });
-      this.stage = 'closed';
-      this.w = 0;
       this.layout();
-      this.setHint();
       this.stream(true);
     };
   }
@@ -463,9 +532,9 @@ export class Revolver {
     if (this.stage !== 'closed') return;
     this.stage = 'fired';
     this.trig = 1;
+    this.cw = 0;
     this.placeCues();
     this.setHint();
-    // hammer drops
     const fromH = this.hammer, t0 = performance.now();
     const drop = () => { const k = Math.min(1, (performance.now() - t0) / 55); this.hammer = fromH * (1 - k); if (k < 1) requestAnimationFrame(drop); };
     drop();
@@ -475,28 +544,29 @@ export class Revolver {
     else this.waitTimer = setTimeout(() => { if (this.stage === 'fired') this.q('.g-hint').textContent = '…'; }, 900);
   }
 
-  // the host's answer (spectators, or when our live flag was unknown)
   setResult(dead) {
     if (this.result !== null) return;
     if (this.stage === 'fired') { this.showResult(dead); return; }
-    // nobody pulled on this phone (auto fire / a bot / spectator late): play the pull quickly
     this.autoPlay(dead);
   }
 
-  // scripted run: spin, snap shut, pull — used by spectators of bots, auto-fire and the test bench
+  // scripted run: load, spin, pull — spectators of bots, auto-fire and the test bench
   async autoPlay(dead = null) {
     if (this.auto) return;
     this.auto = true;
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    if (this.stage === 'open') { this.flick(1800 + Math.random() * 900); await wait(dead === null ? 1100 : 700); this.close(); await wait(650); }
+    if (this.stage === 'load') { await wait(dead === null ? 700 : 300); this.close(); await wait(650); }
     while (this.stage === 'closing') await wait(50);
     if (this.stage === 'closed') {
+      this.flick(2400 + Math.random() * 1200);
+      await wait(dead === null ? 1300 : 900);
+      this.cw = 0; this.snapCyl();
       const t0 = performance.now();
       await new Promise((res) => {
         const step = () => {
           if (!this.el || this.stage !== 'closed') return res();
           const k = Math.min(1, (performance.now() - t0) / 700);
-          this.trig = k; this.hammer = k * 0.92; this.flute = this.fluteBase() + k * FLUTE_PITCH;
+          this.trig = k; this.hammer = k * 0.92; this.extra = k * FLUTE_PITCH;
           if (k < 1) setTimeout(step, 16); else res();
         };
         step();
@@ -507,7 +577,6 @@ export class Revolver {
       } else this.fire();
     } else if (this.stage === 'fired' && dead !== null) this.showResult(dead);
   }
-
   showResult(dead) {
     if (this.result !== null || !this.el) return;
     this.result = dead;
@@ -555,10 +624,9 @@ export class Revolver {
         if (!this.el) return;
         sfx.play('relief');
         this.el.classList.add('alive');
-        const left = 6 - (this.o.pulls + 1);
         const b = this.o.bullets || 1;
         res.innerHTML = `<div class="r-big small">*click*</div><div class="r-txt">${this.watch ? `${name} lives` : 'You live'}</div>
-          <div class="r-sub">${left <= b ? 'Next pull is certain death.' : `Next time: ${b} in ${left}.`}</div>`;
+          <div class="r-sub">Still ${b} in 6 next time.</div>`;
         res.classList.add('on');
       }, 700);
     }
@@ -601,24 +669,22 @@ export class Revolver {
   // ------------------------------------------------------------ spectators
   applyStream(m) {
     if (!this.watch || !m) return;
-    if (m.st === 'open' && this.stage === 'open') {
-      this.angle = m.a; this.w = m.w; this.snapTo = null;
-    }
-    if ((m.st === 'closed' || m.st === 'fired') && this.stage === 'open') this.close();
-    if (this.stage === 'closed' || this.stage === 'closing') {
+    if (Array.isArray(m.b) && this.stage === 'load') { this.slots = m.b.filter((k) => k >= 0 && k < 6); this.paintSlots(); }
+    if ((m.st === 'closed' || m.st === 'fired') && this.stage === 'load') this.close();
+    if (this.stage === 'closed') {
       this.trig = m.tr || 0; this.hammer = m.h || 0; this.cocked = !!m.ck;
-      if (this.cocked && (m.tr || 0) === 0) this.flute = FLUTE_PITCH;
-      else this.flute = (this.cocked ? FLUTE_PITCH : 0) + (this.cocked ? 0 : (m.tr || 0) * FLUTE_PITCH);
+      this.extra = this.cocked ? FLUTE_PITCH : (m.tr || 0) * FLUTE_PITCH;
+      if (typeof m.c === 'number') { this.cyl = m.c; this.cw = m.w || 0; this.snapTo = null; }
     }
-    if (m.st === 'fired' && this.stage === 'closed') { this.stage = 'fired'; this.hammer = 0; this.trig = 1; this.setHint(); }
+    if (m.st === 'fired' && this.stage === 'closed') { this.stage = 'fired'; this.hammer = 0; this.trig = 1; this.cw = 0; this.setHint(); }
   }
 
   stream(force = false) {
     if (this.watch || !this.o.onStream) return;
     const now = performance.now();
     if (!force && now - this.lastStream < 110) return;
-    const st = this.stage === 'closing' ? 'open' : this.stage === 'result' ? 'fired' : this.stage;
-    const m = { st, a: Math.round(this.angle), w: Math.round(this.w), h: +this.hammer.toFixed(2), tr: +this.trig.toFixed(2), ck: this.cocked ? 1 : 0 };
+    const st = this.stage === 'closing' ? 'load' : this.stage === 'result' ? 'fired' : this.stage;
+    const m = { st, b: this.slots, c: Math.round(this.cyl), w: Math.round(this.cw), h: +this.hammer.toFixed(2), tr: +this.trig.toFixed(2), ck: this.cocked ? 1 : 0 };
     const key = JSON.stringify(m);
     if (!force && key === this.streamKey) return;
     this.streamKey = key; this.lastStream = now;
@@ -629,36 +695,35 @@ export class Revolver {
   frame(t) {
     const dt = Math.min(0.05, (t - this.last) / 1000);
     this.last = t;
-    if (this.stage === 'open' || this.stage === 'closing') {
-      if (!this.drag || this.drag.kind !== 'spin') {
-        if (Math.abs(this.w) > 30) {
-          this.angle += this.w * dt;
-          this.w *= Math.exp(-(Math.abs(this.w) > 500 ? 0.45 : 1.1) * dt);
-        } else {
-          if (this.snapTo === null) this.snapTo = Math.round(this.angle / 60) * 60;
-          this.w = 0;
-          this.angle += (this.snapTo - this.angle) * Math.min(1, dt * 12);
-        }
+    if (this.stage === 'closed' && (!this.drag || this.drag.kind !== 'cyl')) {
+      if (Math.abs(this.cw) > 40) {
+        this.cyl += this.cw * dt;
+        this.cw *= Math.exp(-(Math.abs(this.cw) > 600 ? 0.5 : 1.3) * dt);
+        this.snapTo = null;
+      } else {
+        this.cw = 0;
+        if (this.snapTo == null) this.snapCyl();
+        this.cyl += (this.snapTo - this.cyl) * Math.min(1, dt * 12);
       }
-      const idx = Math.floor((this.angle + 30) / 60);
-      if (this.lastTickIdx !== null && idx !== this.lastTickIdx && t - this.lastTickAt > 28) {
-        this.lastTickAt = t;
-        sfx.play('tick', { vol: clamp(0.25 + Math.abs(this.w) / 4000, 0.25, 0.6) });
-        if (Math.abs(this.w) < 900) vibrate(4);
-      }
-      this.lastTickIdx = idx;
     }
+    const idx = Math.floor((this.cyl + this.extra) / FLUTE_PITCH);
+    if (this.lastTickIdx !== null && idx !== this.lastTickIdx && t - this.lastTickAt > 28) {
+      this.lastTickAt = t;
+      sfx.play('tick', { vol: clamp(0.25 + Math.abs(this.cw) / 5000, 0.25, 0.6) });
+      if (Math.abs(this.cw) < 1000) vibrate(4);
+    }
+    this.lastTickIdx = idx;
     this.render();
     if (this.stage !== 'result') this.stream();
   }
 
   render() {
-    this.spinG.setAttribute('transform', `rotate(${this.angle.toFixed(2)})`);
-    const sp = Math.abs(this.w);
-    this.blurEl.style.opacity = clamp((sp - 250) / 1400, 0, 0.9).toFixed(2);
+    const sp = Math.abs(this.cw);
+    this.blurEl.setAttribute('opacity', clamp((sp - 200) / 1600, 0, 0.92).toFixed(2));
     this.hamG.setAttribute('transform', `rotate(${(HAMMER_COCKED * this.hammer).toFixed(2)} 286 196)`);
     this.trigG.setAttribute('transform', `rotate(${(TRIGGER_MAX * this.trig).toFixed(2)} 377 300)`);
-    this.flutesG.setAttribute('transform', `translate(0 ${(this.flute % FLUTE_PITCH).toFixed(2)})`);
+    const off = (((this.cyl + this.extra) % FLUTE_PITCH) + FLUTE_PITCH) % FLUTE_PITCH;
+    this.flutesG.setAttribute('transform', `translate(0 ${off.toFixed(2)})`);
   }
 
   destroy() {

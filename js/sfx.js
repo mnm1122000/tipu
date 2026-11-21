@@ -107,6 +107,17 @@ const SOUNDS = {
     // ringing ears
     s.tone(t + 0.15, 2.6, { f: 3950, type: 'sine', vol: 0.025, att: 0.3 });
   },
+  // a lighter shot for the back-room gallery
+  pop(s, t) {
+    s.nz(t, 0.02, { f: 8000, type: 'highpass', vol: 0.7 });
+    s.nz(t, 0.18, { f: 5000, f2: 500, type: 'lowpass', vol: 0.6, wet: 0.3 });
+    s.tone(t, 0.12, { f: 130, f2: 45, vol: 0.5, att: 0.002 });
+  },
+  // a bottle shatters
+  glass(s, t) {
+    for (let i = 0; i < 9; i++) s.nz(t + 0.02 + Math.random() * 0.18, 0.05 + Math.random() * 0.08, { f: 4000 + Math.random() * 5000, q: 8, vol: 0.25 });
+    [2637, 3520, 4186].forEach((f, i) => s.tone(t + 0.03 + i * 0.02, 0.25, { f: f * (0.95 + Math.random() * 0.1), type: 'sine', vol: 0.05 }));
+  },
   // the hammer falls on an empty chamber
   dry(s, t) {
     s.nz(t, 0.012, { f: 5200, q: 6, vol: 0.9 });

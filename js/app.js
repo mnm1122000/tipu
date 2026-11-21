@@ -1,5 +1,6 @@
 // TIPU! — app: screens, host loop, client flow, table animations, the reveal and the gun.
-import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND } from './engine.js?v=1';
+import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK } from './engine.js?v=1';
+import { openIdle } from './idle.js?v=1';
 import * as net from './net.js?v=1';
 import { sfx, vibrate } from './sfx.js?v=1';
 import { Revolver } from './gun.js?v=1';
@@ -328,7 +329,7 @@ function runBots(now) {
     const b = g.p(s.turn);
     if (b && b.bot) {
       const key = `${s.round}:${s.turn}:${s.pile}`;
-      if (App.botKey !== key) { App.botKey = key; App.botAt = now + 1400 + Math.random() * 1600; }
+      if (App.botKey !== key) { App.botKey = key; App.botAt = now + 1400 + Math.random() * 1600 + (s.pile === 0 ? 4500 : 0); }
       else if (now > App.botAt) {
         App.botKey = null;
         const a = brain({ hand: b.hand, table: s.table, lastN: s.lastPlay ? s.lastPlay.n : 0, forced: s.forced, canCall: !!s.lastPlay && s.lastPlay.by !== b.id, pile: s.pile });
@@ -520,21 +521,31 @@ function onFx(e) {
     case 'start': sfx.play('cock'); break;
     case 'deal': {
       sfx.play('shuffle');
-      App.dealAt = Date.now();
+      App.dealAt = Date.now() + INTRO_MS;
+      showIntro(e, v);
       setTimeout(() => {
         const c = pilePt();
         (e.to || []).forEach((pid, i) => {
           for (let k = 0; k < 2; k++) flyCard({ from: c, to: seatPt(pid), w: 30, dur: 380, delay: i * 70 + k * 160 });
         });
         sfx.play('deal'); sfx.play('deal', { delay: 0.25 });
-      }, 700);
+        render();
+      }, INTRO_MS + 200);
       setTimeout(() => {
         const sign = $('.tablecard');
         if (sign) sign.animate([{ transform: 'rotateY(90deg) scale(1.4)' }, { transform: 'none' }], { duration: 500, easing: 'cubic-bezier(.2,.9,.3,1.3)' });
         sfx.play('flip');
-      }, 1200);
+      }, INTRO_MS + 700);
       break;
     }
+    case 'bullet': {
+      const up = e.delta > 0;
+      sfx.play(up ? 'cock' : 'relief');
+      vibrate(up ? [60, 40, 60] : 40);
+      stamp(`${up ? '+1 BULLET' : '−1 BULLET'}<small>${esc(NameOf(e.pid))} ${e.why === 'caught' ? `got caught lying ${STREAK}×` : `told the truth ${STREAK}× when called`} · now ${e.bullets} in 6</small>`, up ? 'lie' : 'truth', 2600);
+      break;
+    }
+    case 'idle': if (e.pid !== App.me && P(e.pid)) toast(`👻🍾 ${P(e.pid).name} shot ${e.score} bottles`, 2000); break;
     case 'play': {
       sfx.play('play', { n: e.n });
       if (!v) break;
@@ -544,6 +555,7 @@ function onFx(e) {
       break;
     }
     case 'liar': {
+      if (App.idle && v && v.settings.bets) { App.idle.close(); App.idle = null; toast('👻 Bet time!'); }
       sfx.play('liar');
       vibrate([80, 40, 160]);
       stamp(`TIPU!<small>${esc(NameOf(e.by))} → ${esc(nameOf(e.target))}</small>`, 'liar', 1600);
@@ -571,6 +583,49 @@ function onFx(e) {
     case 'shot': onShot(e); break;
     case 'win': sfx.play('win', { delay: 0.6 }); setTimeout(confetti, 600); break;
   }
+}
+
+// ======================================================================
+// ROUND INTRO — every round: the table card and exactly what's in the deck
+// ======================================================================
+const INTRO_MS = 4200;
+function showIntro(e, v) {
+  const mix = e.mix || (v && v.mix);
+  if (!mix) return;
+  $('#intro')?.remove();
+  clearTimeout(App.introTimer);
+  const cols = [['K', 'Kings'], ['Q', 'Queens'], ['A', 'Aces'], ['J', 'Jokers'], ['D', 'Devil']].filter(([r]) => mix[r] > 0);
+  const total = cols.reduce((t, [r]) => t + mix[r], 0);
+  const tw = e.twist ? TWISTS[e.twist] : null;
+  const el = document.createElement('div');
+  el.id = 'intro';
+  el.innerHTML = `<div class="in-box">
+    <div class="in-round">ROUND ${e.round}</div>
+    <div class="in-table"><div class="in-tc">${cardHTML({ id: 0, r: e.table })}</div><div class="in-tl">${RANK_NAME[e.table].toUpperCase()}'S<br>TABLE</div></div>
+    <div class="in-deck">${cols.map(([r, label], i) => `<div class="in-col ${r === e.table ? 'tb' : ''}" style="--i:${i}">
+      <div class="in-stack">${[0, 1, 2].map((k) => cardHTML({ id: 0, r }).replace('class="card', `style="--k:${k}" class="card`)).join('')}</div>
+      <div class="in-n" data-n="${mix[r]}">0</div><div class="in-l">${label}</div></div>`).join('')}</div>
+    <div class="in-total">${total} cards · ${HAND} each · ${RANK_PLURAL[e.table]}${mix.J ? ', Jokers' : ''}${mix.D ? ', the Devil' : ''} count as true</div>
+    ${tw ? `<div class="in-twist"><b>${tw.icon} TWIST: ${esc(tw.name)}</b><span>${esc(tw.text)}</span></div>` : ''}
+    <div class="in-tap">tap to close · tap the bar at the top to see this again</div></div>`;
+  document.body.appendChild(el);
+  el.addEventListener('click', () => closeIntro());
+  // numbers count up, one column after another
+  el.querySelectorAll('.in-n').forEach((n, i) => {
+    const to = Number(n.dataset.n);
+    const start = 900 + i * 260;
+    for (let k = 1; k <= to; k++) setTimeout(() => { n.textContent = k; if (k === to) { n.classList.add('done'); sfx.play('flip'); } }, start + (k / to) * 420);
+  });
+  setTimeout(() => sfx.play('flip'), 350);
+  if (tw) setTimeout(() => { sfx.play('liar'); vibrate([60, 40, 60]); }, 900 + cols.length * 260 + 500);
+  App.introTimer = setTimeout(closeIntro, INTRO_MS + (tw ? 1200 : 0));
+}
+function closeIntro() {
+  const el = $('#intro');
+  clearTimeout(App.introTimer);
+  if (!el) return;
+  el.classList.add('out');
+  setTimeout(() => el.remove(), 350);
 }
 
 // ======================================================================
@@ -611,7 +666,7 @@ function openGun(pid, watch, v) {
   if (!p) return;
   const multi = v.gun.shooters.length > 1;
   const r = new Revolver({
-    watch, name: p.name, pulls: p.pulls, bullets: v.bulletsEach || 1, live: watch ? null : v.me.live,
+    watch, name: p.name, pulls: p.pulls, bullets: p.bullets || 1, live: watch ? null : v.me.live,
     extra: multi ? `😈 ${v.gun.shooters.length} guns out: ${v.gun.shooters.map((id) => esc(nameOf(id))).join(', ')}` : '',
     onFire: () => act({ type: 'fire' }),
     onStream: (m) => App.bus && App.bus.publish('rv/' + App.me, { ...m, k: v.round }, { qos: 0 }),
@@ -660,13 +715,18 @@ function cardHTML(c, cls = '') {
     <span class="ico">${RANK_ICON[c.r]}</span><span class="big ${c.r === 'J' || c.r === 'D' ? 'word' : ''}">${big}</span><span class="cn br">${c.r === 'J' ? '★' : c.r === 'D' ? '☠' : c.r}</span></div>`;
 }
 
+const screenKey = () => App.screen + ':' + (App.view ? App.view.phase : '');
 function render() {
   const el = $('#screen');
   let html = '';
   if (App.screen === 'connecting') html = rConnecting();
   else if (App.screen === 'game' && App.view) html = rGame(App.view);
   else html = rHome();
+  const sc = $('#screen .scroll');
+  const keep = sc && App.lastScreenKey === screenKey() ? sc.scrollTop : null;
   el.innerHTML = html;
+  App.lastScreenKey = screenKey();
+  if (keep != null && $('#screen .scroll')) $('#screen .scroll').scrollTop = keep;
   if ($('#qr')) drawQR();
   fitHand();
 }
@@ -751,20 +811,22 @@ function rLobby(v) {
       <div class="row"><button class="btn blue" data-act="share">📤 Share link</button><button class="btn ghost" data-act="copy">📋 Copy</button></div>
     </div>
     <div class="panel"><h3>Seats</h3>
-      <div class="small" style="margin-bottom:8px">${host ? 'Put everyone in the order they really sit, going <b>to the left (clockwise)</b>. Use ▲▼.' : 'The host sets the seats to match where everyone sits.'}</div>
-      ${seatPreview(v)}
+      <div class="small" style="margin-bottom:8px">${host ? 'Drag everyone to <b>where they really sit</b> around your table. Turns go clockwise from the seats.' : 'The host puts everyone where they really sit.'}</div>
+      ${host ? `<div class="chips" style="margin-bottom:6px">${chip('shape', 'round', '⭕ Round table', (s.shape || 'round') === 'round')}${chip('shape', 'long', '▭ Long table', s.shape === 'long')}${n >= 2 ? '<span class="chip" data-act="arrReset">↺ Even spacing</span>' : ''}</div>` : ''}
+      ${n >= 2 ? arrangerHTML(v) : ''}
       <div class="plist">
       ${v.players.map((p, i) => `<div class="prow"><span class="seatno">${i + 1}</span>${avHTML(p.id, p.emoji, 'em')}<div class="nm"><span class="dot ${p.online ? '' : 'off'}"></span> ${esc(p.name)}${p.id === App.me ? ' (you)' : ''}</div>
         ${p.id === v.hostId ? '<span class="tag">HOST</span>' : ''}
-        ${host ? `<button class="mv" data-act="move" data-id="${esc(p.id)}" data-d="-1" ${i === 0 ? 'disabled' : ''}>▲</button><button class="mv" data-act="move" data-id="${esc(p.id)}" data-d="1" ${i === n - 1 ? 'disabled' : ''}>▼</button>` : ''}
         ${host && p.id !== v.hostId ? `<button class="x" data-act="kick" data-id="${esc(p.id)}">✕</button>` : ''}</div>`).join('')}
     </div>${DEV && host ? '<button class="btn ghost block sm" data-act="addBot">+ Add bot</button>' : ''}</div>
     <div class="panel"><h3>House rules</h3>
       <div class="setrow"><span class="k">Bullets per gun</span><div class="chips">${chip('bullets', 'auto', 'Auto', s.bullets === 'auto')}${chip('bullets', 1, '1', s.bullets === 1)}${chip('bullets', 2, '2', s.bullets === 2)}</div></div>
-      <div class="small setnote">${s.bullets === 'auto' ? `Auto: 2 bullets when 7+ players start, else 1. Now: <b>${bul}</b>.` : `${bul} in 6 chambers.`}</div>
+      <div class="small setnote">${s.bullets === 'auto' ? `Auto: 2 bullets when 7+ players start, else 1. Now: <b>${bul}</b>` : `<b>${bul}</b>`} = <b>${bul} in 6</b> chance every pull. Told the truth 3× when called: −1 bullet. Caught lying 3×: +1 bullet.</div>
       <div class="setrow"><span class="k">Turn timer</span><div class="chips">${TIMERS.map((t) => chip('timer', t, t ? t + 's' : 'Off', s.timer === t)).join('')}</div></div>
       <div class="setrow"><span class="k">😈 Devil card</span><div class="chips">${chip('devil', 0, 'Off', !s.devil)}${chip('devil', 1, 'On', s.devil)}</div></div>
       <div class="small setnote">Caught on a TIPU! call, the Devil makes <b>everyone else</b> pull their trigger. Must be played alone.</div>
+      <div class="setrow"><span class="k">🌀 Round twists</span><div class="chips">${chip('twists', 0, 'Off', !s.twists)}${chip('twists', 1, 'On', s.twists)}</div></div>
+      <div class="small setnote">From round 2, some rounds get a twist: ↺ turns go counter-clockwise, 📢 anyone can call TIPU!, or 🚫 no Jokers.</div>
       <div class="setrow"><span class="k">👻 Bets on calls</span><div class="chips">${chip('bets', 0, 'Off', !s.bets)}${chip('bets', 1, 'On', s.bets)}</div></div>
       <div class="small setnote">Everyone not in the call (dead players too) bets LIE or TRUTH before the reveal.</div>
       <div class="deckline">Deck for ${Math.max(2, n)}: <b>${mix.K}</b> Kings · <b>${mix.Q}</b> Queens · <b>${mix.A}</b> Aces · <b>${mix.J}</b> Jokers${mix.D ? ' · <b>1</b> Devil' : ''} · ${HAND} each</div>
@@ -776,39 +838,72 @@ function rLobby(v) {
   </div>`;
 }
 
-function seatPreview(v) {
+// Where each player sits, as an angle around the table. If the host arranged the real seats we keep
+// those angles (and the gaps between people); otherwise everyone is spaced evenly. Each phone turns the
+// table so its own seat is at the bottom.
+function seatAngles(v) {
   const n = v.players.length;
-  if (n < 2) return '';
-  const mi = Math.max(0, v.players.findIndex((p) => p.id === App.me));
-  return `<div class="minitable"><div class="minifelt"></div>${v.players.map((p, k) => {
-    const j = (k - mi + n) % n;
-    const ang = Math.PI / 2 + (j * 2 * Math.PI) / n;
-    return `<div class="miniseat" style="left:${50 + 40 * Math.cos(ang)}%;top:${50 + 38 * Math.sin(ang)}%">${avHTML(p.id, p.emoji)}<span>${k + 1}</span><i>${esc(p.id === App.me ? 'You' : p.name)}</i></div>`;
-  }).join('')}<div class="minidir">↻ turns go left</div></div>`;
+  const seats = v.settings.seats || {};
+  const all = n > 1 && v.players.every((p) => seats[p.id]);
+  const raw = {};
+  v.players.forEach((p, k) => { raw[p.id] = all ? Math.atan2(seats[p.id][1] - 0.5, seats[p.id][0] - 0.5) : (k * 2 * Math.PI) / n; });
+  const mine = raw[App.me] ?? raw[v.players[0]?.id] ?? 0;
+  const out = {};
+  for (const p of v.players) out[p.id] = Math.PI / 2 + raw[p.id] - mine;
+  return out;
+}
+function arrangeDefault(v) {
+  const seats = {};
+  const n = v.players.length;
+  v.players.forEach((p, k) => { const a = Math.PI / 2 + (k * 2 * Math.PI) / n; seats[p.id] = [0.5 + 0.42 * Math.cos(a), 0.5 + 0.4 * Math.sin(a)]; });
+  return seats;
+}
+function arrangerHTML(v) {
+  const host = App.mode === 'host';
+  const seats = App.arrDrag ? App.arrDrag.seats : (v.settings.seats && v.players.every((p) => v.settings.seats[p.id]) ? v.settings.seats : arrangeDefault(v));
+  const long = v.settings.shape === 'long';
+  return `<div class="arranger ${long ? 'long' : ''} ${host ? 'host' : ''}" id="arranger"><div class="arr-felt"></div>
+    ${v.players.map((p, k) => { const [x, y] = seats[p.id] || [0.5, 0.5]; return `<div class="arr-seat" data-pid="${esc(p.id)}" style="left:${x * 100}%;top:${y * 100}%">${avHTML(p.id, p.emoji)}<span>${k + 1}</span><i>${esc(p.id === App.me ? 'You' : p.name)}</i></div>`; }).join('')}
+    <div class="arr-mid">↻ turns go clockwise<br><small>${host ? 'drag people to their real seats' : 'the host places everyone'}</small></div></div>`;
 }
 
-function gunDots(p, bullets) {
-  return `<div class="gd">${Array.from({ length: 6 }, (_, i) => `<i class="${i < p.pulls ? 'u' : ''}"></i>`).join('')}</div>`;
+function gunDots(p) {
+  return `<div class="gd">${Array.from({ length: 6 }, (_, i) => `<i class="${i < (p.bullets || 1) ? 'u' : ''}"></i>`).join('')}</div>`;
 }
 function seatsHTML(v) {
-  const n = v.players.length;
-  const mi = Math.max(0, v.players.findIndex((p) => p.id === App.me));
+  const ang = seatAngles(v);
   const r = v.reveal;
   const shooters = v.gun ? v.gun.shooters : [];
-  return v.players.map((p, k) => {
-    const j = (k - mi + n) % n;
-    const ang = Math.PI / 2 + (j * 2 * Math.PI) / n;
-    const x = 50 + 44 * Math.cos(ang), y = 48 + 41 * Math.sin(ang);
+  return v.players.map((p) => {
+    const a = ang[p.id];
+    const x = 50 + 44 * Math.cos(a), y = 48 + 41 * Math.sin(a);
     const cls = [p.id === v.turn && v.phase === 'play' ? 'turn' : '', p.alive ? '' : 'dead', p.online === false ? 'off' : '',
       r && (p.id === r.caller) ? 'caller' : '', r && p.id === r.target ? 'target' : '', shooters.includes(p.id) ? 'shooter' : '', p.id === App.me ? 'me' : ''].join(' ');
-    const odds = p.alive ? Math.round(oddsNext(p.pulls, v.bulletsEach || 1) * 100) : null;
+    const odds = p.alive ? Math.round(oddsNext(p.bullets || 1) * 100) : null;
     return `<div class="seat ${cls}" data-seat="${esc(p.id)}" style="left:${x}%;top:${y}%">
       ${avHTML(p.id, p.emoji)}${p.alive ? '' : '<div class="ghost">👻</div>'}
       <div class="nm">${esc(p.id === App.me ? 'You' : p.name)}</div>
-      ${p.alive ? `<div class="cc">${p.count ? `<b>${p.count}</b>🂠` : '<span class="out">empty</span>'}</div>${gunDots(p)}` : `<div class="cc">${p.bets ? `🎯 ${p.reads}/${p.bets}` : 'dead'}</div>`}
+      ${p.alive ? `<div class="cc">${p.count ? `<b>${p.count}</b>🂠` : '<span class="out">empty</span>'}</div>${gunDots(p)}` : `<div class="cc">${p.bets ? `🎯 ${p.reads}/${p.bets}` : 'dead'}${p.idle ? ` · 🍾${p.idle}` : ''}</div>`}
       ${v.lastPlay && v.lastPlay.by === p.id && v.phase === 'play' ? `<div class="lp">${v.lastPlay.n}</div>` : ''}
       ${p.alive && odds >= 50 ? `<div class="hot">${odds}%</div>` : ''}</div>`;
   }).join('');
+}
+
+// the small always-visible reminder: what's in the deck this round, direction, twist, my gun
+function infoBarHTML(v) {
+  if (!v.mix) return '';
+  const m = v.mix;
+  const me = P(App.me);
+  const parts = [['K', m.K], ['Q', m.Q], ['A', m.A], ['J', m.J], ['D', m.D]].filter(([, n]) => n > 0)
+    .map(([r, n]) => `<span class="ib-c r-${r} ${r === v.table ? 'tb' : ''}"><b>${r === 'J' ? '★' : r === 'D' ? '☠' : r}</b>${n}</span>`).join('');
+  const tw = v.twist ? `<span class="ib-tw">${TWISTS[v.twist].icon} ${esc(TWISTS[v.twist].name)}</span>` : '';
+  const gun = me && me.alive ? `<span class="ib-gun" title="your gun">🔫${me.bullets}/6 · 😇${me.honest}/${STREAK} · 🤥${me.caught}/${STREAK}</span>` : '';
+  return `<div class="infobar" data-act="intro">${parts}<span class="ib-dir">${v.dir === -1 ? '↺' : '↻'}</span>${tw}${gun}</div>`;
+}
+function dirRingSVG(v) {
+  return `<svg class="dirring ${v.dir === -1 ? 'ccw' : ''}" viewBox="0 0 100 100" preserveAspectRatio="none"><defs><marker id="dah" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="rgba(255,216,119,.8)"/></marker></defs>
+    <path d="${v.dir === -1 ? 'M8 50 A42 42 0 0 0 50 92' : 'M50 92 A42 42 0 0 1 8 50'}" fill="none" stroke="rgba(255,216,119,.55)" stroke-width="1.2" marker-end="url(#dah)"/>
+    <path d="${v.dir === -1 ? 'M92 50 A42 42 0 0 0 50 8' : 'M50 8 A42 42 0 0 1 92 50'}" fill="none" stroke="rgba(255,216,119,.55)" stroke-width="1.2" marker-end="url(#dah)"/></svg>`;
 }
 
 function tableCardHTML(v) {
@@ -872,8 +967,10 @@ function rTable(v) {
   const meP = P(App.me);
   const sub = `Round ${v.round} · ${v.players.filter((p) => p.alive).length} alive${v.bulletsEach > 1 ? ` · ${v.bulletsEach} bullets` : ''}`;
   return `<div class="game">${topbar(v, sub)}
-    <div id="table" class="table n${v.players.length}">
+    ${infoBarHTML(v)}
+    <div id="table" class="table n${v.players.length} ${v.settings.shape === 'long' ? 'long' : ''}">
       <div class="felt"></div>
+      ${dirRingSVG(v)}
       ${seatsHTML(v)}
       <div class="center">
         ${tableCardHTML(v)}
@@ -898,6 +995,7 @@ function statusHTML(v) {
     } else {
       const t = P(v.turn);
       main = `${esc(t?.emoji || '')} ${esc(nameOf(v.turn))} is thinking…`;
+      if (v.canCall) main += ' <span class="small">· 📢 you can call TIPU!</span>';
       if (meP && !meP.alive) main = `👻 You're a ghost. ${main}`;
     }
   } else if (v.phase === 'reveal') main = 'Showdown!';
@@ -910,7 +1008,7 @@ function actionsHTML(v) {
   if (v.phase !== 'play') return '';
   const out = [];
   const myTurn = v.turn === App.me;
-  if (!myTurn) return '';
+  if (!myTurn) return v.canCall ? `<button class="btn tipu open" data-act="liar">📢 TIPU! <small>on ${esc(nameOf(v.lastPlay.by))}</small></button>` : '';
   const canCall = v.lastPlay && v.lastPlay.by !== App.me;
   const n = App.sel.size;
   if (!v.forced) out.push(`<button class="btn primary playbtn" data-act="play" ${n ? '' : 'disabled'}>${n ? `⬆ Play ${n} as ${n > 1 ? RANK_PLURAL[v.table] : RANK_NAME[v.table]}` : 'Pick 1–3 cards'}</button>`);
@@ -920,14 +1018,17 @@ function actionsHTML(v) {
 
 function handInner(v) {
   const meP = P(App.me);
-  if (meP && !meP.alive) return `<div class="empty">👻 You're out. ${v.settings.bets ? 'Bet on every TIPU! call.' : 'Watch the liars.'}</div>`;
+  if (meP && !meP.alive) return `<div class="empty">👻 You're out. ${v.settings.bets ? 'Bet on every TIPU! call.' : 'Watch the liars.'}<br><button class="btn primary" style="margin-top:12px" data-act="idle">🍾 Shoot bottles while you wait</button>${meP.idle ? `<div class="small" style="margin-top:6px">Your best: ${meP.idle}</div>` : ''}</div>`;
   const hand = v.me.hand;
   if (!hand.length) return `<div class="empty">${v.phase === 'play' ? 'No cards left. You\'re safe this round… unless you get called on.' : ''}</div>`;
   const myTurn = v.phase === 'play' && v.turn === App.me && !v.forced;
-  const fresh = App.dealAt && Date.now() - App.dealAt < 2500;
+  // cards land in your hand once the round intro is over (delay measured from the deal, so re-renders don't restart it)
+  const wait = App.dealAt ? App.dealAt - Date.now() : -1e9;
+  const fresh = wait > -900;
   return hand.map((c, i) => {
-    const cls = [App.sel.has(c.id) ? 'sel' : '', myTurn ? 'can' : '', fresh ? 'dealin' : ''].join(' ');
-    return cardHTML(c, cls).replace('class="card', `data-act="card" data-id="${c.id}" style="--d:${(fresh ? 900 : 0) + i * 110}ms" class="card`);
+    const d = Math.max(0, wait) + i * 110;
+    const cls = [App.sel.has(c.id) ? 'sel' : '', myTurn ? 'can' : '', fresh && d + 450 > 0 ? 'dealin' : ''].join(' ');
+    return cardHTML(c, cls).replace('class="card', `data-act="card" data-id="${c.id}" style="--d:${fresh ? d : 0}ms" class="card`);
   }).join('');
 }
 function fitHand() {
@@ -980,11 +1081,14 @@ function closeModal() {
 }
 function rulesHTML() {
   return `<div class="title">How to play TIPU!</div><div class="rules">
-    <h4>The table</h4><ul><li>2–10 players, one phone each. One phone hosts, the rest scan the QR code.</li><li>Everyone gets <b>5 cards</b>. The deck is made of Kings, Queens, Aces and a few <b>Jokers</b> (wild), and grows with the table.</li><li>Each round the phone picks a <b>table card</b>: King, Queen or Ace.</li><li>Everyone has their own <b>revolver</b>: 6 chambers, 1 bullet (2 bullets when 7+ players start, on Auto).</li></ul>
-    <h4>Your turn</h4><ul><li>Put down <b>1 to 3 cards face down</b>. You are claiming they are all the table card. Jokers count as the table card. You may lie.</li><li>Or, if someone played before you, shout <b>TIPU!</b> (liar) on their cards.</li><li>Out of cards? You're skipped. If everyone else is empty, the next player <b>must</b> call TIPU!</li></ul>
-    <h4>TIPU!</h4><ul><li>The cards are turned over. If <b>any</b> card isn't the table card or a Joker, the liar takes the gun. If they were all true, the <b>caller</b> takes the gun.</li><li>Before the reveal, everyone else (the dead too 👻) bets <b>LIE</b> or <b>TRUTH</b>. The sharpest reader is crowned at the end.</li></ul>
-    <h4>The gun</h4><ul><li>The cylinder swings out. Flick it to spin, swipe down to snap it shut, drag the hammer back if you like, then press the trigger and pull.</li><li>Every pull moves to the next chamber, so your odds get worse each time: 1 in 6, 1 in 5, 1 in 4…</li><li>Survive and a new round starts with fresh cards and a new table card. Die and you're a ghost.</li></ul>
-    <h4>😈 Devil card (optional)</h4><ul><li>One Devil card in the deck. It counts as true and must be played alone. If someone calls TIPU! on it, <b>everyone else</b> at the table pulls their trigger.</li></ul>
+    <h4>The table</h4><ul><li>2–10 players, one phone each. One phone hosts, the rest scan the QR code. The host drags everyone to where they really sit, and turns go clockwise from those seats.</li><li>Every round everyone gets <b>5 cards</b>. The deck is Kings, Queens, Aces and a few <b>Jokers</b> (wild), and grows with the table. At the start of each round the phone shows exactly how many of each are in the deck. Tap the bar at the top to see it again.</li><li>Each round the phone picks a <b>table card</b>: King, Queen or Ace.</li></ul>
+    <h4>Your turn</h4><ul><li>Put down <b>1 to 3 cards face down</b>, claiming they are all the table card. Jokers count as the table card. You may lie.</li><li>Or, if someone played before you, shout <b>TIPU!</b> (liar).</li><li>Out of cards? You're skipped. If everyone else is empty, the next player <b>must</b> call TIPU!</li></ul>
+    <h4>TIPU!</h4><ul><li>The cards are turned over. If <b>any</b> card isn't the table card or a Joker, the liar takes the gun. If they were all true, the <b>caller</b> takes the gun.</li><li>Before the reveal, everyone else (the dead too 👻) bets <b>LIE</b> or <b>TRUTH</b>. The sharpest reader gets an award at the end.</li></ul>
+    <h4>The gun</h4><ul><li>You start with <b>1 bullet</b> (2 when 7+ players start, on Auto). Every pull is a fresh spin: <b>bullets in 6</b> chance, every time.</li><li>You see your bullets in the cylinder and can move them around, then load the gun. Swipe across the cylinder to spin it, drag the hammer back if you like, then press the trigger and pull.</li></ul>
+    <h4>Bullets move</h4><ul><li>😇 Called a liar while telling the truth <b>${STREAK} times</b>: <b>−1 bullet</b> (never below 1).</li><li>🤥 Caught lying <b>${STREAK} times</b>: <b>+1 bullet</b> (up to 5).</li></ul>
+    <h4>🌀 Round twists</h4><ul><li>From round 2, some rounds get a twist: <b>↺ Counter-clockwise</b> (turns go the other way), <b>📢 Anyone can call</b> (anyone can shout TIPU! on the last play), <b>🚫 No Jokers</b>.</li></ul>
+    <h4>😈 Devil card (optional)</h4><ul><li>One Devil card in the deck. It counts as true and must be played alone. If someone calls TIPU! on it, <b>everyone else</b> pulls their trigger.</li></ul>
+    <h4>Dead?</h4><ul><li>You're a ghost: keep betting, and shoot bottles in the back room while you wait.</li></ul>
     <h4>Winning</h4><ul><li>Last player alive wins.</li></ul>
     </div><button class="btn primary block" data-act="closeModal">Got it</button>`;
 }
@@ -1104,6 +1208,15 @@ document.addEventListener('click', async (e) => {
     case 'timer': act({ type: 'settings', patch: { timer: Number(t.dataset.v) } }); break;
     case 'devil': act({ type: 'settings', patch: { devil: t.dataset.v === '1' } }); break;
     case 'bets': act({ type: 'settings', patch: { bets: t.dataset.v === '1' } }); break;
+    case 'twists': act({ type: 'settings', patch: { twists: t.dataset.v === '1' } }); break;
+    case 'shape': act({ type: 'settings', patch: { shape: t.dataset.v } }); break;
+    case 'arrReset': act({ type: 'arrange', seats: arrangeDefault(v) }); break;
+    case 'intro': if (v && v.mix) showIntro({ round: v.round, table: v.table, mix: v.mix, twist: v.twist }, v); break;
+    case 'idle': {
+      if (App.idle) break;
+      App.idle = openIdle({ best: P(App.me)?.idle || 0, onScore: (sc) => act({ type: 'idle', score: sc }), onClose: () => { App.idle = null; } });
+      break;
+    }
     case 'start': act({ type: 'start' }); break;
     case 'toLobby': act({ type: 'lobby' }); break;
     case 'card': {
@@ -1156,6 +1269,34 @@ function paintHand() {
   const acts = $('.actions');
   if (acts) acts.innerHTML = actionsHTML(v);
 }
+// host drags people around the virtual table to match the real one
+document.addEventListener('pointerdown', (e) => {
+  const seat = e.target.closest('.arranger.host .arr-seat');
+  const v = App.view;
+  if (!seat || !v || App.mode !== 'host') return;
+  const box = $('#arranger').getBoundingClientRect();
+  const cur = v.settings.seats && v.players.every((p) => v.settings.seats[p.id]) ? v.settings.seats : arrangeDefault(v);
+  App.arrDrag = { pid: seat.dataset.pid, seats: JSON.parse(JSON.stringify(cur)), box };
+  seat.classList.add('drag');
+  e.preventDefault();
+});
+document.addEventListener('pointermove', (e) => {
+  const d = App.arrDrag;
+  if (!d) return;
+  const x = Math.max(0.04, Math.min(0.96, (e.clientX - d.box.left) / d.box.width));
+  const y = Math.max(0.05, Math.min(0.95, (e.clientY - d.box.top) / d.box.height));
+  d.seats[d.pid] = [x, y];
+  const el = document.querySelector(`.arr-seat[data-pid="${CSS.escape(d.pid)}"]`);
+  if (el) { el.style.left = x * 100 + '%'; el.style.top = y * 100 + '%'; el.classList.add('drag'); }
+});
+document.addEventListener('pointerup', () => {
+  const d = App.arrDrag;
+  if (!d) return;
+  App.arrDrag = null;
+  sfx.play('click'); vibrate(10);
+  act({ type: 'arrange', seats: d.seats });
+});
+
 // swipe the selected cards up to play them
 let swipe = null;
 document.addEventListener('pointerdown', (e) => {
@@ -1205,16 +1346,18 @@ window.__bench = {
     if (App.gun && App.gun.pid === App.me && App.gun.r.result === null) { if (this.autoGun) setTimeout(() => App.gun && App.gun.r.autoPlay(), 1500); return; }
     if (!this.auto) return;
     if (v.phase === 'reveal' && v.reveal.stage === 'bet' && v.reveal.canBet && !v.reveal.myBet && Math.random() < 0.5) { act({ type: 'bet', pick: Math.random() < 0.5 ? 'lie' : 'truth' }); return; }
+    if (v.phase === 'play' && v.turn !== App.me && v.canCall && Math.random() < 0.06) { act({ type: 'liar' }); return; }
     if (v.phase === 'play' && v.turn === App.me) {
       if (this._turn === v.pile + ':' + v.round) return;
       this._turn = v.pile + ':' + v.round;
+      const wait = v.pile === 0 ? 4500 : 0;
       setTimeout(() => {
         const vv = App.view;
-        if (!vv || vv.phase !== 'play' || vv.turn !== App.me) return;
+        if (!vv || vv.phase !== 'play' || vv.turn !== App.me) { this._turn = null; return; }
         const a = brain({ hand: vv.me.hand, table: vv.table, lastN: vv.lastPlay ? vv.lastPlay.n : 0, forced: vv.forced, canCall: !!vv.lastPlay && vv.lastPlay.by !== App.me, pile: vv.pile });
         if (a.type === 'play') { App.sel = new Set(a.cards); paintHand(); setTimeout(playSelected, 350); }
         else act(a);
-      }, 700 + Math.random() * 900);
+      }, wait + 700 + Math.random() * 900);
     }
   },
   fire() { if (App.gun && !App.gun.watch) App.gun.r.autoPlay(); },

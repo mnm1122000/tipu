@@ -15,20 +15,51 @@ for (let n = 2; n <= 10; n++) {
   ok(buildDeck(n).length === HAND * n, `buildDeck ${n}`);
 }
 ok(isTrue({ r: 'J' }, 'K') && isTrue({ r: 'K' }, 'K') && !isTrue({ r: 'Q' }, 'K') && isTrue({ r: 'D' }, 'A'), 'isTrue');
-ok(oddsNext(0, 1) === 1 / 6 && oddsNext(5, 1) === 1 && oddsNext(4, 2) === 1, 'odds');
+ok(oddsNext(1) === 1 / 6 && oddsNext(2) === 2 / 6, 'odds');
 ok(bulletsFor({ bullets: 'auto' }, 7) === 2 && bulletsFor({ bullets: 'auto' }, 6) === 1 && bulletsFor({ bullets: 2 }, 3) === 2, 'bullets');
 
-// every gun kills on or before pull 6 - bullets + 1, and the chance per pull is uniform
+// fixed odds: with 2 bullets every pull fires about 2 times in 6
 {
-  const firstDeath = [0, 0, 0, 0, 0, 0];
-  for (let k = 0; k < 60000; k++) {
+  let dead = 0, N = 30000;
+  for (let k = 0; k < N; k++) {
     const g = Game.create('T', { id: 'a', name: 'A' });
     g.addPlayer({ id: 'b', name: 'B' });
     g.start(0);
-    firstDeath[g.p('a').chambers[0]]++;
+    const a = g.p('a'); a.bullets = 2; a.pulls = 4;
+    g.s.phase = 'gun'; g.s.gun = { shooters: ['a'], done: {}, until: 1e12 };
+    g.handle('a', { type: 'fire' }, 0);
+    if (!a.alive) dead++;
   }
-  const exp = 10000;
-  ok(firstDeath.every((c) => Math.abs(c - exp) < 600), 'bullet position uniform ' + firstDeath.join(','));
+  ok(Math.abs(dead / N - 1 / 3) < 0.015, 'fixed odds 2/6 got ' + (dead / N).toFixed(3));
+}
+
+// bullet streaks: caught 3 times = +1 bullet, honest when called 3 times = -1 bullet
+{
+  const g = Game.create('T', { id: 'a', name: 'A' });
+  g.addPlayer({ id: 'b', name: 'B' }); g.addPlayer({ id: 'c', name: 'C' });
+  g.s.settings.timer = 0; g.s.settings.bets = false; g.s.settings.bullets = 2; g.start(0);
+  const s = g.s, a = g.p('a');
+  const call = (lie) => {
+    s.phase = 'play'; s.turn = 'a'; s.forced = false;
+    a.hand = [{ id: 7000 + Math.floor(Math.random() * 999), r: lie ? (s.table === 'K' ? 'Q' : 'K') : s.table }];
+    g.handle('a', { type: 'play', cards: [a.hand[0].id] }, 0);
+    g.handle(s.turn, { type: 'liar' }, 0);
+    let t = 0; while (s.phase === 'reveal') { t += 100; g.tick(t); }
+    s.phase = 'play'; s.gun = null;
+  };
+  call(true); call(true); ok(a.bullets === 2, 'two lies: no change');
+  call(true); ok(a.bullets === 3 && a.caught === 0, 'third lie: +1 bullet');
+  call(false); call(false); call(false); ok(a.bullets === 2 && a.honest === 0, 'three truths: -1 bullet');
+}
+
+// seats arranged on the virtual table set the turn order (clockwise)
+{
+  const g = Game.create('T', { id: 'a', name: 'A' });
+  for (const id of ['b', 'c', 'd']) g.addPlayer({ id, name: id });
+  g.handle('a', { type: 'arrange', seats: { a: [0.5, 0.95], b: [0.05, 0.5], c: [0.95, 0.5], d: [0.5, 0.05] } });
+  ok(g.s.players.map((q) => q.id).join('') === 'dcab' || g.s.players.map((q) => q.id).join('') === 'cabd' || g.s.players.map((q) => q.id).join(''), 'arranged');
+  const order = g.s.players.map((q) => q.id).join('');
+  ok(['abdc', 'bdca', 'dcab', 'cabd'].includes(order), 'clockwise from the seats: ' + order);
 }
 
 // scripted round: a lie gets caught
@@ -87,6 +118,22 @@ ok(bulletsFor({ bullets: 'auto' }, 7) === 2 && bulletsFor({ bullets: 'auto' }, 6
   ok(g.handle('b', { type: 'liar' }, 0).ok, 'forced call ok');
 }
 
+// twists: counter-clockwise turns, open calls, no jokers
+{
+  const g = Game.create('T', { id: 'a', name: 'A' });
+  for (const id of ['b', 'c', 'd']) g.addPlayer({ id, name: id });
+  g.s.settings.timer = 0; g.start(0);
+  const s = g.s;
+  s.dir = -1; s.twist = 'reverse'; s.turn = 'a';
+  g.handle('a', { type: 'play', cards: [g.p('a').hand[0].id] }, 0);
+  ok(s.turn === 'd', 'reverse: a → d');
+  s.twist = 'open';
+  ok(g.canCall('c') && !g.canCall('a'), 'open: anyone but the player can call');
+  ok(g.handle('c', { type: 'liar' }, 0).ok && s.reveal.caller === 'c', 'open: c calls out of turn');
+  const m = deckMix(6, false, true);
+  ok(m.J === 0 && m.K + m.Q + m.A === 30, 'no-joker deck');
+}
+
 // random full games
 let games = 0, rounds = 0, maxRounds = 0;
 const stats = {};
@@ -97,6 +144,7 @@ for (let n = 2; n <= MAX_PLAYERS; n++) {
     g.s.settings.timer = k % 3 ? 0 : 20;
     g.s.settings.devil = k % 4 === 0;
     g.s.settings.bets = k % 2 === 0;
+    g.s.settings.twists = k % 5 !== 0;
     ok(g.start(0).ok, 'start');
     const s = g.s;
     let t = 0, steps = 0;
@@ -106,6 +154,8 @@ for (let n = 2; n <= MAX_PLAYERS; n++) {
         const me = g.p(s.turn);
         ok(me && me.alive, 'turn player alive');
         if (Math.random() < 0.1 && k % 3 === 0) { g.tick(t + 60000); continue; } // let the timer play
+        const caller = s.twist === 'open' && Math.random() < 0.15 ? s.players.find((q) => g.canCall(q.id) && q.id !== me.id) : null;
+        if (caller) { ok(g.handle(caller.id, { type: 'liar' }, t).ok, 'open call'); continue; }
         const canCall = s.lastPlay && s.lastPlay.by !== me.id;
         if (s.forced || (canCall && Math.random() < 0.35)) ok(g.handle(me.id, { type: 'liar' }, t).ok, 'liar');
         else {
@@ -123,7 +173,7 @@ for (let n = 2; n <= MAX_PLAYERS; n++) {
       }
       const total = s.players.reduce((a, q) => a + q.hand.length, 0) + s.pile;
       if (s.phase === 'play') ok(total === HAND * g.alive().length, `cards conserved ${total}`);
-      for (const q of s.players) ok(q.pulls <= 6 && (q.alive || q.chambers.includes(q.pulls - 1)), 'gun sane');
+      for (const q of s.players) ok(q.bullets >= 1 && q.bullets <= 5, 'bullets in range');
     }
     ok(s.phase === 'over' && s.winner && g.alive().length === 1, `game ends (n=${n})`);
     ok(s.deaths.length === n - 1, 'deaths recorded');
