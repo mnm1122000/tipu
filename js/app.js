@@ -1,10 +1,11 @@
 // TIPU! — app: screens, host loop, client flow, table animations, the reveal and the gun.
-import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK } from './engine.js?v=3';
-import { openIdle } from './idle.js?v=3';
-import { Actor } from './actor.js?v=3';
-import * as net from './net.js?v=3';
-import { sfx, vibrate } from './sfx.js?v=3';
-import { Revolver } from './gun.js?v=3';
+import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK } from './engine.js?v=4';
+import { openIdle } from './idle.js?v=4';
+import { Actor, OUTFITS, characterSVG } from './actor.js?v=4';
+import { GUNS, sideGunSVG } from './gun.js?v=4';
+import * as net from './net.js?v=4';
+import { sfx, vibrate } from './sfx.js?v=4';
+import { Revolver } from './gun.js?v=4';
 
 // ======================================================================
 // utils
@@ -46,6 +47,7 @@ const App = {
   ident: null, hostKey: null, hostPub: null,
   view: null, lastViewAt: 0,
   profile: store.get('profile', { name: '', emoji: EMOJIS[Math.floor(Math.random() * EMOJIS.length)] }),
+  wardrobe: null,
   screen: 'home', screenData: {},
   sel: new Set(),
   modalKind: null,
@@ -55,6 +57,9 @@ const App = {
   avatars: {},
 };
 window.__app = App; // debugging / test bench
+if (!Number.isInteger(App.profile.outfit)) App.profile.outfit = Math.floor(Math.random() * OUTFITS.length);
+if (!GUNS[App.profile.gun]) App.profile.gun = 'classic';
+const myLook = () => ({ outfit: App.profile.outfit, gun: App.profile.gun });
 const P = (id) => App.view && App.view.players.find((p) => p.id === id);
 const nameOf = (id) => (id === App.me ? 'You' : P(id)?.name || '?');
 const NameOf = (id) => (id === App.me ? 'You' : P(id)?.name || '?');
@@ -137,7 +142,7 @@ async function hostCreate() {
   App.code = genCode();
   App.me = 'h_' + rid(8);
   App.hostKeys = await net.genKeys();
-  App.game = Game.create(App.code, { id: App.me, name: App.profile.name, emoji: App.profile.emoji });
+  App.game = Game.create(App.code, { id: App.me, name: App.profile.name, emoji: App.profile.emoji, ...myLook() });
   App.bus = new net.Bus(App.code);
   await App.bus.connectAny(0);
   await hostWire();
@@ -197,7 +202,7 @@ async function onHostUp(data) {
   App.seen[pid] = Date.now();
   switch (msg.type) {
     case 'join': {
-      const res = g.addPlayer({ id: pid, name: msg.name, emoji: msg.emoji });
+      const res = g.addPlayer({ id: pid, name: msg.name, emoji: msg.emoji, outfit: msg.outfit, gun: msg.gun });
       if (!res.ok) { sendTo(pid, { type: 'error', error: res.error, fatal: true }); return; }
       if (!res.rejoin) sfx.play('join');
       afterChange(); sendView(pid, true);
@@ -391,7 +396,7 @@ async function clientHello() {
   if (!App.bus || !App.ident) return;
   App.bus.publish('up', { t: 'hello', pid: App.me, pub: App.ident.keys.pub });
   await sleep(250);
-  await sendHost({ type: 'join', name: App.profile.name, emoji: App.profile.emoji });
+  await sendHost({ type: 'join', name: App.profile.name, emoji: App.profile.emoji, ...myLook() });
 }
 async function sendHost(obj) {
   if (!App.hostKey || !App.bus) return;
@@ -588,9 +593,11 @@ function onFx(e) {
       break;
     }
     case 'verdict': {
-      if (e.devil) { sfx.play('devil'); vibrate([300, 100, 300]); stamp('THE DEVIL<small>everyone else takes the gun</small>', 'devil', 2400); }
-      else if (e.lie) { sfx.play('caught'); stamp(`LIAR!<small>${esc(NameOf(e.target))} take${e.target === App.me ? '' : 's'} the gun</small>`, 'lie', 2300); }
-      else { sfx.play('honest'); stamp(`TRUTH!<small>${esc(NameOf(e.caller))} take${e.caller === App.me ? '' : 's'} the gun</small>`, 'truth', 2300); }
+      // the reveal panel already shows LIAR! / TRUTH! big, so no second stamp on top of it
+      if (e.devil) { sfx.play('devil'); vibrate([300, 100, 300]); }
+      else if (e.lie) { sfx.play('caught'); vibrate([60, 40, 120]); }
+      else sfx.play('honest');
+      $('#reveal')?.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.04)' }, { transform: 'scale(1)' }], { duration: 300 });
       break;
     }
     case 'gun': break; // the view brings the overlay
@@ -682,11 +689,11 @@ function openGun(pid, watch, v) {
   // the gun itself only appears on the shooter's phone; everyone else watches the shooter as a character
   const r = watch ? new Actor({
     name: p.name, photo: App.avatars[pid] || null, emoji: p.emoji, pulls: p.pulls, bullets: p.bullets || 1,
-    outfit: Math.max(0, v.players.findIndex((q) => q.id === pid)),
+    outfit: Number.isInteger(p.outfit) ? p.outfit : Math.max(0, v.players.findIndex((q) => q.id === pid)), gun: p.gun,
     extra: multi ? `😈 ${v.gun.shooters.length} guns out: ${v.gun.shooters.map((id) => esc(nameOf(id))).join(', ')}` : '',
     onResult: () => { if (App.gun) App.gun.resultAt = Date.now(); },
   }) : new Revolver({
-    watch, name: p.name, pulls: p.pulls, bullets: p.bullets || 1, live: watch ? null : v.me.live,
+    watch, name: p.name, pulls: p.pulls, bullets: p.bullets || 1, live: watch ? null : v.me.live, gun: p.gun,
     extra: multi ? `😈 ${v.gun.shooters.length} guns out: ${v.gun.shooters.map((id) => esc(nameOf(id))).join(', ')}` : '',
     onFire: () => act({ type: 'fire' }),
     onStream: (m) => App.bus && App.bus.publish('rv/' + App.me, { ...m, k: v.round }, { qos: 0 }),
@@ -706,6 +713,11 @@ function gunClose(now = false) {
 }
 function onRv(m, pid) {
   if (!m || pid === App.me) return;
+  if (App.mode === 'host' && m.st === 'fired' && App.game && App.game.s.phase === 'gun') {
+    // backup path: the shooter pulled but their 'fire' message is late. The outcome was fixed when the gun came out.
+    const g = App.game.s.gun;
+    if (g.shooters.includes(pid) && !(pid in g.done)) { App.game.handle(pid, { type: 'fire' }, Date.now()); afterChange(); }
+  }
   App.rvLast = App.rvLast || {};
   App.rvLast[pid] = m;
   if (App.gun && App.gun.watch && App.gun.pid === pid) App.gun.r.applyStream(m);
@@ -773,6 +785,8 @@ function rHome() {
         <div class="me-btns"><button class="btn sm" data-act="pickCamera">📸 Take photo</button><button class="btn sm" data-act="pickGallery">🖼️ Gallery</button>${pr.photo ? '<button class="btn sm ghost" data-act="clearPhoto">✕ Use emoji</button>' : ''}</div>
       </div>
       <input id="nameIn" class="field" maxlength="16" placeholder="Your name" value="${esc(pr.name)}" autocomplete="off">
+      <div class="wr-home" data-act="wardrobe"><div class="wr-mini">${characterSVG({ ...myLook(), photo: pr.photo, emoji: pr.emoji }, 'home', { pose: 'up' })}</div>
+        <div><b>${esc(OUTFITS[pr.outfit].name)}</b><div class="small">${esc(GUNS[pr.gun].name)} revolver</div><span class="btn sm primary" style="margin-top:8px">👔 Wardrobe</span></div></div>
       <div class="emojis">${EMOJIS.map((e) => `<button data-act="emoji" data-e="${e}" class="${e === pr.emoji && !pr.photo ? 'on' : ''}">${e}</button>`).join('')}</div>
     </div>
     ${code ? `
@@ -820,7 +834,8 @@ function rLobby(v) {
   const n = v.players.length;
   const enough = n >= v.minPlayers;
   const bul = s.bullets === 'auto' ? (n >= 7 ? 2 : 1) : s.bullets;
-  const mix = deckMix(Math.max(2, n), s.devil);
+  const mode = s.mode || 'party';
+  const mix = deckMix(Math.max(2, n), s.devil && mode !== 'classic');
   const chip = (act, val, label, on) => `<span class="chip ${on ? 'on' : ''} ${host ? '' : 'disabled'}" data-act="${act}" data-v="${val}">${label}</span>`;
   return `<div class="game">${topbar(v, `${n}/${MAX_PLAYERS} at the table`)}
   <div class="scroll">
@@ -839,16 +854,24 @@ function rLobby(v) {
         ${p.id === v.hostId ? '<span class="tag">HOST</span>' : ''}
         ${host && p.id !== v.hostId ? `<button class="x" data-act="kick" data-id="${esc(p.id)}">✕</button>` : ''}</div>`).join('')}
     </div>${DEV && host ? '<button class="btn ghost block sm" data-act="addBot">+ Add bot</button>' : ''}</div>
+    <button class="btn block wr-lobby" data-act="wardrobe">👔 Wardrobe · ${esc(OUTFITS[App.profile.outfit].name)} · ${esc(GUNS[App.profile.gun].name)}</button>
+    <div class="panel"><h3>Game mode</h3>
+      <div class="modes">${[['classic', '🎩', 'Classic', 'Only the next player can call TIPU!. No twists, no bets, no Devil, bullets never change. Pure lying.'],
+        ['party', '🎉', 'Party', 'Classic + round twists, bets with bullet stakes, bullets move with your record. Devil optional.'],
+        ['chaos', '🔥', 'Chaos', 'Party, but <b>anyone</b> at the table can shout TIPU! on any play, any time.']].map(([k, ic, nm, d]) =>
+        `<div class="mode ${mode === k ? 'on' : ''} ${host ? '' : 'disabled'}" data-act="mode" data-v="${k}"><div class="mi">${ic}</div><div><b>${nm}</b><div class="small">${d}</div></div></div>`).join('')}</div>
+    </div>
     <div class="panel"><h3>House rules</h3>
       <div class="setrow"><span class="k">Bullets per gun</span><div class="chips">${chip('bullets', 'auto', 'Auto', s.bullets === 'auto')}${chip('bullets', 1, '1', s.bullets === 1)}${chip('bullets', 2, '2', s.bullets === 2)}</div></div>
-      <div class="small setnote">${s.bullets === 'auto' ? `Auto: 2 bullets when 7+ players start, else 1. Now: <b>${bul}</b>` : `<b>${bul}</b>`} = <b>${bul} in 6</b> chance every pull. Told the truth 3× when called: −1 bullet. Caught lying 3×: +1 bullet.</div>
+      <div class="small setnote">${s.bullets === 'auto' ? `Auto: 2 bullets when 7+ players start, else 1. Now: <b>${bul}</b>` : `<b>${bul}</b>`} = <b>${bul} in 6</b> chance every pull.${mode === 'classic' ? '' : ' Told the truth 3× when called: −1 bullet. Caught lying 3×: +1 bullet.'}</div>
       <div class="setrow"><span class="k">Turn timer</span><div class="chips">${TIMERS.map((t) => chip('timer', t, t ? t + 's' : 'Off', s.timer === t)).join('')}</div></div>
+      ${mode === 'classic' ? '' : `
       <div class="setrow"><span class="k">😈 Devil card</span><div class="chips">${chip('devil', 0, 'Off', !s.devil)}${chip('devil', 1, 'On', s.devil)}</div></div>
       <div class="small setnote">Caught on a TIPU! call, the Devil makes <b>everyone else</b> pull their trigger. Must be played alone.</div>
       <div class="setrow"><span class="k">🌀 Round twists</span><div class="chips">${chip('twists', 0, 'Off', !s.twists)}${chip('twists', 1, 'On', s.twists)}</div></div>
       <div class="small setnote">From round 2, some rounds get a twist: ↺ turns go counter-clockwise, 📢 anyone can call TIPU!, or 🚫 no Jokers.</div>
       <div class="setrow"><span class="k">👻 Bets on calls</span><div class="chips">${chip('bets', 0, 'Off', !s.bets)}${chip('bets', 1, 'On', s.bets)}</div></div>
-      <div class="small setnote">Everyone not in the call bets LIE, TRUTH or PASS before the reveal. Alive: wrong = +1 bullet, 2 right = −1 bullet. Ghosts bet for glory.</div>
+      <div class="small setnote">Everyone not in the call bets LIE, TRUTH or PASS before the reveal. Alive: wrong = +1 bullet, 2 right = −1 bullet. Ghosts bet for glory.</div>`}
       <div class="deckline">Deck for ${Math.max(2, n)}: <b>${mix.K}</b> Kings · <b>${mix.Q}</b> Queens · <b>${mix.A}</b> Aces · <b>${mix.J}</b> Jokers${mix.D ? ' · <b>1</b> Devil' : ''} · ${HAND} each</div>
     </div>
   </div>
@@ -1107,6 +1130,7 @@ function closeModal() {
 }
 function rulesHTML() {
   return `<div class="title">How to play TIPU!</div><div class="rules">
+    <h4>Modes</h4><ul><li><b>🎩 Classic</b>: only the next player can call TIPU!, nothing else changes. <b>🎉 Party</b>: twists, bets with stakes, moving bullets. <b>🔥 Chaos</b>: Party, and anyone can call TIPU! any time.</li></ul>
     <h4>The table</h4><ul><li>2–10 players, one phone each. One phone hosts, the rest scan the QR code. The host drags everyone to where they really sit, and turns go clockwise from those seats.</li><li>Every round everyone gets <b>5 cards</b>. The deck is Kings, Queens, Aces and a few <b>Jokers</b> (wild), and grows with the table. At the start of each round the phone shows exactly how many of each are in the deck. Tap the bar at the top to see it again.</li><li>Each round the phone picks a <b>table card</b>: King, Queen or Ace.</li></ul>
     <h4>Your turn</h4><ul><li>Put down <b>1 to 3 cards face down</b>, claiming they are all the table card. Jokers count as the table card. You may lie.</li><li>Or, if someone played before you, shout <b>TIPU!</b> (liar).</li><li>Out of cards? You're skipped. If everyone else is empty, the next player <b>must</b> call TIPU!</li></ul>
     <h4>TIPU!</h4><ul><li>The cards are turned over. If <b>any</b> card isn't the table card or a Joker, the liar takes the gun. If they were all true, the <b>caller</b> takes the gun.</li><li>Before the reveal, everyone else bets <b>LIE</b>, <b>TRUTH</b> or <b>PASS</b>. If you're alive it's for real: a <b>wrong read loads +1 bullet</b>, every <b>2 right reads remove 1</b>, PASS is safe. Ghosts 👻 bet for glory. The sharpest reader gets an award at the end.</li></ul>
@@ -1154,12 +1178,36 @@ function readProfile() {
   return n;
 }
 
+// ======================================================================
+// WARDROBE — pick your look (outfit) and your revolver. Everyone sees it when you take the gun.
+// ======================================================================
+function saveLook() {
+  store.set('profile', App.profile);
+  if (App.view && App.mode) act({ type: 'look', ...myLook() });
+}
+function wardrobeSheet(keepScroll = false) {
+  const pr = App.profile;
+  const grid = $('#modal .wr-grid');
+  const sc = keepScroll && grid ? grid.scrollLeft : 0;
+  openModal(`<div class="title">👔 Wardrobe</div>
+    <div class="wr-top"><div class="wr-big">${characterSVG({ ...myLook(), photo: pr.photo, emoji: pr.emoji }, 'wbig', { pose: 'up' })}</div>
+      <div class="wr-info"><b>${esc(OUTFITS[pr.outfit].name)}</b><div class="small">${OUTFITS[pr.outfit].g === 'f' ? 'Women' : 'Men'}'s outfit · your photo is the face</div>
+      <div class="wr-gunname">🔫 ${esc(GUNS[pr.gun].name)}<div class="small">${esc(GUNS[pr.gun].desc)}</div></div></div></div>
+    <h4 class="wr-h">Outfit</h4>
+    <div class="wr-grid">${OUTFITS.map((o, i) => `<button class="wr-o ${i === pr.outfit ? 'on' : ''}" data-act="wrOutfit" data-v="${i}">${characterSVG({ outfit: i, gun: pr.gun, emoji: '🙂' }, 'wo' + i, { pose: 'down' })}<span>${esc(o.name)}</span></button>`).join('')}</div>
+    <h4 class="wr-h">Revolver</h4>
+    <div class="wr-guns">${Object.entries(GUNS).map(([k, g]) => `<button class="wr-g ${k === pr.gun ? 'on' : ''}" data-act="wrGun" data-v="${k}">${sideGunSVG('_w' + k, k)}<span>${esc(g.name)}</span></button>`).join('')}</div>
+    <button class="btn primary block" data-act="wrDone">Done</button>`, 'wardrobe');
+  const g2 = $('#modal .wr-grid');
+  if (g2) g2.scrollLeft = sc;
+}
+
 // practice gun on the home screen (nothing at stake: 1 in 6 each time, for fun)
 function tryGun() {
   if (App.gun) return;
   const pulls = 0;
   const r = new Revolver({
-    watch: false, name: 'You', pulls, bullets: 1, live: Math.random() < 1 / 6,
+    watch: false, name: 'You', pulls, bullets: 1, live: Math.random() < 1 / 6, gun: App.profile.gun,
     extra: 'Practice round. Nothing at stake.',
     onFire: () => {}, onStream: null,
     onResult: () => { setTimeout(() => { if (App.gun && App.gun.r === r) gunClose(true); }, 3600); },
@@ -1218,6 +1266,10 @@ document.addEventListener('click', async (e) => {
     case 'closeModal': closeModal(); break;
     case 'mute': sfx.setMuted(!sfx.muted); render(); break;
     case 'testSound': testSound(); break;
+    case 'wardrobe': readProfile(); wardrobeSheet(); break;
+    case 'wrOutfit': App.profile.outfit = Number(t.dataset.v); saveLook(); wardrobeSheet(true); break;
+    case 'wrGun': App.profile.gun = t.dataset.v; saveLook(); wardrobeSheet(true); sfx.play('cock'); break;
+    case 'wrDone': closeModal(); render(); break;
     case 'tryGun': sfx.unlock(); tryGun(); break;
     case 'menu': menuSheet(); break;
     case 'share': {
@@ -1235,6 +1287,7 @@ document.addEventListener('click', async (e) => {
     case 'devil': act({ type: 'settings', patch: { devil: t.dataset.v === '1' } }); break;
     case 'bets': act({ type: 'settings', patch: { bets: t.dataset.v === '1' } }); break;
     case 'twists': act({ type: 'settings', patch: { twists: t.dataset.v === '1' } }); break;
+    case 'mode': if (App.mode === 'host') act({ type: 'settings', patch: { mode: t.dataset.v } }); break;
     case 'shape': act({ type: 'settings', patch: { shape: t.dataset.v } }); break;
     case 'arrReset': act({ type: 'arrange', seats: arrangeDefault(v) }); break;
     case 'intro': if (v && v.mix) showIntro({ round: v.round, table: v.table, mix: v.mix, twist: v.twist }, v); break;
@@ -1403,7 +1456,7 @@ setInterval(() => { if (window.__bench.auto || window.__bench.autoGun) window.__
 function route() {
   const join = (params.get('join') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (join.length === 5 && params.has('auto') && params.get('name')) { // test bench players join by themselves
-    App.profile = { name: params.get('name').slice(0, 16), emoji: params.get('emoji') || EMOJIS[Math.floor(Math.random() * EMOJIS.length)] };
+    App.profile = { name: params.get('name').slice(0, 16), emoji: params.get('emoji') || EMOJIS[Math.floor(Math.random() * EMOJIS.length)], outfit: Math.floor(Math.random() * OUTFITS.length), gun: Object.keys(GUNS)[Math.floor(Math.random() * 5)] };
     clientJoin(join).catch(() => teardown());
     return;
   }

@@ -76,6 +76,35 @@ ok(bulletsFor({ bullets: 'auto' }, 7) === 2 && bulletsFor({ bullets: 'auto' }, 6
   ok(who('d') === 1, 'two right reads: -1 bullet');
 }
 
+// classic mode: only the next player calls, no bets, bullets never move, no twists, no devil
+{
+  const g = Game.create('T', { id: 'a', name: 'A' });
+  for (const id of ['b', 'c', 'd']) g.addPlayer({ id, name: id, outfit: 3, gun: 'gold' });
+  ok(g.p('b').outfit === 3 && g.p('b').gun === 'gold', 'look stored');
+  g.addPlayer({ id: 'b', name: 'b', outfit: 99, gun: 'laser' });
+  ok(g.p('b').outfit === null && g.p('b').gun === 'classic', 'bad look rejected');
+  g.s.settings.mode = 'classic'; g.s.settings.devil = true; g.s.settings.timer = 0;
+  g.start(0);
+  const s = g.s;
+  ok(s.mix.D === 0, 'classic: no devil');
+  s.twist = 'open'; s.turn = 'a';
+  g.handle('a', { type: 'play', cards: [g.p('a').hand[0].id] }, 0);
+  ok(!g.canCall('c') || s.turn === 'c', 'classic: only the next player calls');
+  g.handle(s.turn, { type: 'liar' }, 0);
+  ok(s.reveal.stage === 'flip', 'classic: no betting');
+  for (let r = 2; r < 40; r++) { g.newRound(0); ok(!s.twist, 'classic: no twists'); }
+}
+// chaos mode: anyone can call any time
+{
+  const g = Game.create('T', { id: 'a', name: 'A' });
+  for (const id of ['b', 'c', 'd']) g.addPlayer({ id, name: id });
+  g.s.settings.mode = 'chaos'; g.s.settings.timer = 0; g.start(0);
+  const s = g.s; s.twist = null; s.turn = 'a';
+  g.handle('a', { type: 'play', cards: [g.p('a').hand[0].id] }, 0);
+  const other = ['b', 'c', 'd'].find((id) => id !== s.turn);
+  ok(g.canCall(other) && g.handle(other, { type: 'liar' }, 0).ok, 'chaos: anyone calls');
+}
+
 // seats arranged on the virtual table set the turn order (clockwise)
 {
   const g = Game.create('T', { id: 'a', name: 'A' });
@@ -169,6 +198,7 @@ for (let n = 2; n <= MAX_PLAYERS; n++) {
     g.s.settings.devil = k % 4 === 0;
     g.s.settings.bets = k % 2 === 0;
     g.s.settings.twists = k % 5 !== 0;
+    g.s.settings.mode = ['classic', 'party', 'chaos'][k % 3];
     ok(g.start(0).ok, 'start');
     const s = g.s;
     let t = 0, steps = 0;

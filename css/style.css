@@ -450,7 +450,7 @@ input { font: inherit; -webkit-user-select: text; user-select: text; }
 .a-spot { position: absolute; left: 50%; top: -18%; width: 130%; height: 120%; transform: translateX(-50%); pointer-events: none;
   background: conic-gradient(from 180deg at 50% 0%, transparent 0deg 158deg, rgba(255,226,170,.16) 168deg 192deg, transparent 202deg); filter: blur(6px); animation: spotFlicker 4s infinite; }
 @keyframes spotFlicker { 0%, 100% { opacity: 1; } 47% { opacity: .85; } 50% { opacity: .55; } 53% { opacity: .9; } }
-.a-wrap { height: 100%; aspect-ratio: 400 / 620; max-width: 92vw; transform-style: preserve-3d; animation: actorSway 6s ease-in-out infinite; filter: drop-shadow(0 30px 30px rgba(0,0,0,.8)); }
+.a-wrap { height: 100%; aspect-ratio: 300 / 680; max-width: 92vw; transform-style: preserve-3d; animation: actorSway 6s ease-in-out infinite; filter: drop-shadow(0 30px 30px rgba(0,0,0,.8)); }
 @keyframes actorSway { 0%, 100% { transform: rotateY(-14deg) rotateX(4deg); } 50% { transform: rotateY(12deg) rotateX(2deg); } }
 #gun.bang .a-wrap, #gun.click .a-wrap { animation-play-state: paused; }
 .a-svg { width: 100%; height: 100%; display: block; overflow: visible; }
@@ -465,3 +465,31 @@ input { font: inherit; -webkit-user-select: text; user-select: text; }
 #gun.actor .g-hint { bottom: calc(var(--safe-b) + 24px); }
 #gun.actor .g-result { bottom: 8%; }
 #gun.actor .g-cylside { opacity: 1 !important; }
+.modes { display: flex; flex-direction: column; gap: 8px; }
+.mode { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 14px; background: rgba(255,235,210,.05); border: 1.5px solid transparent; cursor: pointer; }
+.mode.on { border-color: var(--gold); background: rgba(231,182,74,.12); }
+.mode.disabled { pointer-events: none; }
+.mode:not(.on).disabled { opacity: .5; }
+.mode .mi { font-size: 28px; }
+.mode b { font-family: Bungee, Impact, sans-serif; font-weight: 400; color: var(--gold2); }
+
+/* ---------- wardrobe ---------- */
+.wr-home { display: flex; gap: 12px; align-items: center; margin-top: 10px; padding: 8px 10px; border-radius: 14px; background: rgba(0,0,0,.25); cursor: pointer; }
+.wr-mini { width: 62px; height: 140px; flex: 0 0 auto; }
+.wr-mini svg, .wr-big svg, .wr-o svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.wr-home b { font-family: Bungee, Impact, sans-serif; font-weight: 400; color: var(--gold2); }
+.wr-lobby { margin-top: 12px; }
+.wr-top { display: flex; gap: 14px; align-items: center; background: radial-gradient(60% 80% at 40% 40%, #3a1a1c, #0e0607); border-radius: 16px; padding: 10px; }
+.wr-big { width: 120px; height: 272px; flex: 0 0 auto; }
+.wr-info b { font-family: Bungee, Impact, sans-serif; font-weight: 400; font-size: 20px; color: var(--gold2); }
+.wr-gunname { margin-top: 14px; font-weight: 800; }
+.wr-h { margin: 14px 0 6px; color: var(--gold2); font-family: Bungee, Impact, sans-serif; font-weight: 400; font-size: 14px; }
+.wr-grid { display: grid; grid-auto-flow: column; grid-auto-columns: 82px; gap: 8px; overflow-x: auto; padding-bottom: 6px; }
+.wr-o { border: 1.5px solid var(--line); background: rgba(255,235,210,.04); border-radius: 12px; padding: 6px 4px 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; height: 178px; }
+.wr-o svg { height: 140px; }
+.wr-o span, .wr-g span { font-size: 10px; font-weight: 800; color: var(--mut); text-align: center; line-height: 1.1; }
+.wr-o.on, .wr-g.on { border-color: var(--gold); background: rgba(231,182,74,.14); }
+.wr-o.on span, .wr-g.on span { color: var(--gold2); }
+.wr-guns { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.wr-g { border: 1.5px solid var(--line); background: rgba(255,235,210,.04); border-radius: 12px; padding: 6px 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.wr-g svg { width: 100%; height: 34px; }

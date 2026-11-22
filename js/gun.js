@@ -5,7 +5,7 @@
 //   4. press the trigger and pull it back until it breaks
 //   5. BANG or *click*
 // Everyone else sees a live mirror of the same gun (spin, hammer and trigger streamed ~10×/s).
-import { sfx, vibrate } from './sfx.js?v=3';
+import { sfx, vibrate } from './sfx.js?v=4';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -16,8 +16,31 @@ const FLUTE_PITCH = 49;           // side-view flute spacing (one chamber)
 const PULL_DA = 120, PULL_SA = 46; // trigger travel in gun units: double action vs cocked
 
 // ---------------------------------------------------------------- artwork
+// gun variations: finish of the metal, the grip, and barrel length
+export const GUNS = {
+  classic: { name: 'Classic', desc: 'Blued steel, walnut grip', len: 1,
+    steel: ['#6f7c8f', '#2c3440', '#11161d', '#2a323d', '#0a0d12'], barrel: ['#9aa6b6', '#3a4452', '#161b23', '#3b4553', '#0b0e13'],
+    cyl: ['#0b0e13', '#3c4655', '#b7c1cf', '#7d8898', '#262d38', '#07090c'], flute: ['#05070a', '#1a2029', '#4a5464'], grip: ['#7a3b18', '#4a1f0b', '#6b3014', '#2a1006'], check: 'rgba(0,0,0,.32)' },
+  nickel: { name: 'Nickel', desc: 'Polished chrome, black grip', len: 1,
+    steel: ['#f2f5f8', '#b8c0ca', '#7d8794', '#c9d0d8', '#4a525c'], barrel: ['#ffffff', '#c9d0d8', '#8a939e', '#d9dee4', '#555d66'],
+    cyl: ['#4a525c', '#a0a9b4', '#ffffff', '#d0d6dc', '#7d8794', '#3a4048'], flute: ['#2a3038', '#5a626c', '#9aa3ad'], grip: ['#2e2e33', '#141416', '#28282c', '#0a0a0c'], check: 'rgba(255,255,255,.08)' },
+  gold: { name: 'Gold', desc: 'Solid gold, ivory grip', len: 1,
+    steel: ['#fff2b0', '#e2b04a', '#9a6b1c', '#d9a840', '#5a3e0e'], barrel: ['#fff6c8', '#f0c45a', '#a87420', '#e8b84c', '#5a3e0e'],
+    cyl: ['#5a3e0e', '#b88a2a', '#fff0b0', '#e8c060', '#8a6014', '#3a2808'], flute: ['#3a2808', '#7a5414', '#c89a3a'], grip: ['#fffaf0', '#ece2cc', '#f6efe0', '#cfc2a6'], check: 'rgba(120,90,40,.25)' },
+  snub: { name: 'Snub', desc: 'Short barrel, close work', len: 0.5,
+    steel: ['#6f7c8f', '#2c3440', '#11161d', '#2a323d', '#0a0d12'], barrel: ['#9aa6b6', '#3a4452', '#161b23', '#3b4553', '#0b0e13'],
+    cyl: ['#0b0e13', '#3c4655', '#b7c1cf', '#7d8898', '#262d38', '#07090c'], flute: ['#05070a', '#1a2029', '#4a5464'], grip: ['#5a2a10', '#341406', '#4a200c', '#1e0a04'], check: 'rgba(0,0,0,.32)' },
+  pearl: { name: 'Pearl', desc: 'Black steel, mother-of-pearl grip', len: 1,
+    steel: ['#4a4f58', '#1a1c20', '#08090b', '#1c1e22', '#000000'], barrel: ['#5a606a', '#22252a', '#0a0b0d', '#24272c', '#000000'],
+    cyl: ['#000000', '#1c1e22', '#6a707a', '#3a3e44', '#121316', '#000000'], flute: ['#000000', '#0c0d0f', '#2a2d32'], grip: ['#ffffff', '#e3ecf6', '#f6e8f2', '#c4d0de'], check: 'rgba(120,140,170,.25)' },
+};
+export const muzzleX = (kind) => 470 + 512 * (GUNS[kind] || GUNS.classic).len;
+const st = (arr, offs) => arr.map((c, i) => `<stop offset="${offs[i]}" stop-color="${c}"/>`).join('');
+
 // the revolver, side view. `sfx` keeps its gradient ids unique when drawn more than once on a page
-export function sideGunSVG(sfx = '') {
+export function sideGunSVG(sfx = '', kind = 'classic') {
+  const G = GUNS[kind] || GUNS.classic;
+  const L = G.len, MX = muzzleX(kind);
   const flutes = [];
   for (let i = -4; i <= 8; i++) flutes.push(`<rect x="342" y="${100 + i * FLUTE_PITCH}" width="104" height="22" rx="11" fill="url(#gFlute)"/>`);
   const checks = [];
@@ -26,21 +49,11 @@ export function sideGunSVG(sfx = '') {
   for (let i = 0; i < 6; i++) spur.push(`<path d="M${236 + i * 6} ${86 + i * 3} l-6 10" />`);
   const svg = `<svg class="g-side" viewBox="0 0 ${VB_W} ${VB_H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="gSteel" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#6f7c8f"/><stop offset=".18" stop-color="#2c3440"/><stop offset=".55" stop-color="#11161d"/><stop offset=".8" stop-color="#2a323d"/><stop offset="1" stop-color="#0a0d12"/>
-    </linearGradient>
-    <linearGradient id="gBarrel" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#9aa6b6"/><stop offset=".22" stop-color="#3a4452"/><stop offset=".5" stop-color="#161b23"/><stop offset=".78" stop-color="#3b4553"/><stop offset="1" stop-color="#0b0e13"/>
-    </linearGradient>
-    <linearGradient id="gCyl" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#0b0e13"/><stop offset=".22" stop-color="#3c4655"/><stop offset=".45" stop-color="#b7c1cf"/><stop offset=".55" stop-color="#7d8898"/><stop offset=".8" stop-color="#262d38"/><stop offset="1" stop-color="#07090c"/>
-    </linearGradient>
-    <linearGradient id="gFlute" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#05070a"/><stop offset=".6" stop-color="#1a2029"/><stop offset="1" stop-color="#4a5464"/>
-    </linearGradient>
-    <linearGradient id="gWood" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#7a3b18"/><stop offset=".35" stop-color="#4a1f0b"/><stop offset=".6" stop-color="#6b3014"/><stop offset="1" stop-color="#2a1006"/>
-    </linearGradient>
+    <linearGradient id="gSteel" x1="0" y1="0" x2="0" y2="1">${st(G.steel, [0, 0.18, 0.55, 0.8, 1])}</linearGradient>
+    <linearGradient id="gBarrel" x1="0" y1="0" x2="0" y2="1">${st(G.barrel, [0, 0.22, 0.5, 0.78, 1])}</linearGradient>
+    <linearGradient id="gCyl" x1="0" y1="0" x2="0" y2="1">${st(G.cyl, [0, 0.22, 0.45, 0.55, 0.8, 1])}</linearGradient>
+    <linearGradient id="gFlute" x1="0" y1="0" x2="0" y2="1">${st(G.flute, [0, 0.6, 1])}</linearGradient>
+    <linearGradient id="gWood" x1="0" y1="0" x2="1" y2="1">${st(G.grip, [0, 0.35, 0.6, 1])}</linearGradient>
     <radialGradient id="gFlash" cx="0" cy=".5" r="1">
       <stop offset="0" stop-color="#fff"/><stop offset=".25" stop-color="#fff3a8"/><stop offset=".55" stop-color="#ff9a1f"/><stop offset="1" stop-color="#ff3d00" stop-opacity="0"/>
     </radialGradient>
@@ -51,7 +64,7 @@ export function sideGunSVG(sfx = '') {
     <!-- grip -->
     <path d="M254 190 C232 280 200 384 176 472 C164 520 188 548 232 550 L300 550 C338 548 352 520 348 488 C344 436 346 360 360 300 Z" fill="#101318"/>
     <path d="M262 206 C240 286 210 384 188 470 C178 510 196 534 232 536 L296 536 C326 534 336 512 333 486 C330 438 333 362 346 306 Z" fill="url(#gWood)"/>
-    <g clip-path="url(#gGripClip)" stroke="rgba(0,0,0,.32)" stroke-width="2.2">${checks.join('')}</g>
+    <g clip-path="url(#gGripClip)" stroke="${G.check}" stroke-width="2.2">${checks.join('')}</g>
     <path d="M262 206 C240 286 210 384 188 470" stroke="rgba(255,200,150,.18)" stroke-width="5" fill="none"/>
     <circle cx="262" cy="410" r="17" fill="#c9a24a" stroke="#6b5216" stroke-width="3"/><text x="262" y="416" font-size="15" text-anchor="middle" fill="#5a4210" font-family="Bungee, Impact, sans-serif">T</text>
     <!-- frame -->
@@ -62,6 +75,7 @@ export function sideGunSVG(sfx = '') {
     <circle cx="296" cy="262" r="7" fill="#3a4350" stroke="#05070a" stroke-width="2"/><path d="M291 262 h10" stroke="#05070a" stroke-width="2"/>
     <circle cx="276" cy="226" r="5.5" fill="#3a4350" stroke="#05070a" stroke-width="2"/>
     <!-- barrel + full lug -->
+    <g transform="translate(470 0) scale(${L} 1) translate(-470 0)">
     <path d="M470 206 L902 206 Q938 206 938 236 Q938 266 902 266 L470 266 Z" fill="url(#gSteel)" stroke="#05070a" stroke-width="3"/>
     <path d="M482 222 L900 222" stroke="rgba(255,255,255,.18)" stroke-width="2"/>
     <circle cx="926" cy="238" r="6" fill="#0b0e13" stroke="#5c6878" stroke-width="2"/>
@@ -70,7 +84,8 @@ export function sideGunSVG(sfx = '') {
     <path d="M478 140 L968 140" stroke="rgba(255,255,255,.45)" stroke-width="2"/>
     <path d="M934 134 L948 106 L970 106 L972 134 Z" fill="#1a2028" stroke="#05070a" stroke-width="2.5"/>
     <rect x="966" y="144" width="16" height="68" rx="5" fill="#0d1116" stroke="#05070a" stroke-width="2"/>
-    <text x="560" y="186" font-size="20" letter-spacing="7" fill="rgba(255,255,255,.28)" font-family="Bungee, Impact, sans-serif">TIPU · SIX · .38</text>
+    </g>
+    ${L === 1 ? `<text x="560" y="186" font-size="20" letter-spacing="7" fill="rgba(255,255,255,.28)" font-family="Bungee, Impact, sans-serif">TIPU · SIX · .38</text>` : ''}
     <!-- trigger guard -->
     <path d="M446 300 C446 362 424 396 376 398 C328 400 310 370 312 326" fill="none" stroke="#0a0d12" stroke-width="20" stroke-linecap="round"/>
     <path d="M446 300 C446 362 424 396 376 398 C328 400 310 370 312 326" fill="none" stroke="url(#gSteel)" stroke-width="13" stroke-linecap="round"/>
@@ -95,7 +110,7 @@ export function sideGunSVG(sfx = '') {
     </g>
   </g>
   <!-- muzzle flash -->
-  <g class="g-flash" transform="translate(982 178)">
+  <g class="g-flash" transform="translate(${MX} 178)">
     <circle r="150" fill="url(#gFlash)" opacity=".9"/>
     <path d="M0 0 L260 -26 L120 0 L260 26 Z M0 0 L170 -90 L80 -6 Z M0 0 L170 90 L80 6 Z M0 0 L90 -130 L40 -10 Z M0 0 L90 130 L40 10 Z" fill="#fff6c8"/>
     <circle r="40" fill="#fff"/>
@@ -154,6 +169,8 @@ export class Revolver {
   constructor(opts) {
     this.o = opts;
     this.watch = !!opts.watch;
+    this.kind = GUNS[opts.gun] ? opts.gun : 'classic';
+    this.mx = muzzleX(this.kind);
     this.stage = 'load';
     const n = Math.max(1, Math.min(5, opts.bullets || 1));
     this.slots = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5).slice(0, n).sort();
@@ -183,7 +200,7 @@ export class Revolver {
         ${o.extra ? `<div class="g-extra">${o.extra}</div>` : ''}
       </div>
       <div class="g-cylwrap"><div class="g-load">${this.loadText()}</div>${rearCylSVG()}</div>
-      <div class="g-gunwrap">${sideGunSVG()}</div>
+      <div class="g-gunwrap">${sideGunSVG('', this.kind)}</div>
       <div class="g-hint"></div>
       <div class="g-btns g-btns-load">${this.watch ? '' : '<button class="g-btn hot" data-g="close">⤵ Load the gun</button>'}</div>
       <div class="g-btns g-btns-spin">${this.watch ? '' : '<button class="g-btn" data-g="spin">↻ Spin it</button>'}</div>
@@ -540,8 +557,9 @@ export class Revolver {
     const fromH = this.hammer, t0 = performance.now();
     const drop = () => { const k = Math.min(1, (performance.now() - t0) / 55); this.hammer = fromH * (1 - k); if (k < 1) requestAnimationFrame(drop); };
     drop();
-    this.stream(true);
-    if (this.o.onFire) this.o.onFire();
+    if (this.o.onFire) this.o.onFire();   // first: the host must hear the shot before any more stream traffic
+    this.streamOff = true;
+    setTimeout(() => { this.streamOff = false; this.stream(true); this.streamOff = true; }, 150);
     if (this.live === true || this.live === false) setTimeout(() => this.showResult(this.live), 60);
     else this.waitTimer = setTimeout(() => { if (this.stage === 'fired') this.q('.g-hint').textContent = '…'; }, 900);
   }
@@ -593,7 +611,7 @@ export class Revolver {
       vibrate([650, 80, 300]);
       this.el.classList.add('bang');
       // muzzle flash
-      this.flashG.animate([{ opacity: 1, transform: 'translate(982px,178px) scale(.6)' }, { opacity: 1, transform: 'translate(982px,178px) scale(1.25)', offset: 0.35 }, { opacity: 0, transform: 'translate(982px,178px) scale(1.5)' }], { duration: 170, easing: 'ease-out' });
+      this.flashG.animate([{ opacity: 1, transform: `translate(${this.mx}px,178px) scale(.6)` }, { opacity: 1, transform: `translate(${this.mx}px,178px) scale(1.25)`, offset: 0.35 }, { opacity: 0, transform: `translate(${this.mx}px,178px) scale(1.5)` }], { duration: 170, easing: 'ease-out' });
       this.q('.g-white').animate([{ opacity: 0.95 }, { opacity: 0 }], { duration: 520, easing: 'ease-out' });
       // recoil: back along the barrel, muzzle flips up
       const base = this.rot ? 'translate(-50%, -50%) rotate(-90deg)' : 'translate(-50%, -50%)';
@@ -637,7 +655,7 @@ export class Revolver {
 
   smoke() {
     const box = this.q('.g-smoke');
-    const m = this.toScreen(990, 178);
+    const m = this.toScreen(this.mx + 8, 178);
     for (let i = 0; i < 14; i++) {
       const s = document.createElement('i');
       const sz = 30 + Math.random() * 60;
@@ -682,11 +700,13 @@ export class Revolver {
   }
 
   stream(force = false) {
-    if (this.watch || !this.o.onStream) return;
+    // kept light on purpose: public relays throttle chatty clients, and the shot itself must never queue behind this
+    if (this.watch || !this.o.onStream || this.streamOff) return;
     const now = performance.now();
-    if (!force && now - this.lastStream < 110) return;
+    if (!force && now - this.lastStream < 320) return;
     const st = this.stage === 'closing' ? 'load' : this.stage === 'result' ? 'fired' : this.stage;
-    const m = { st, b: this.slots, c: Math.round(this.cyl), w: Math.round(this.cw), h: +this.hammer.toFixed(2), tr: +this.trig.toFixed(2), ck: this.cocked ? 1 : 0 };
+    const q = (x, step) => Math.round(x / step) * step;
+    const m = { st, b: this.slots, c: q(this.cyl, 20), w: q(this.cw, 400), h: q(this.hammer, 0.25), tr: q(this.trig, 0.2), ck: this.cocked ? 1 : 0 };
     const key = JSON.stringify(m);
     if (!force && key === this.streamKey) return;
     this.streamKey = key; this.lastStream = now;

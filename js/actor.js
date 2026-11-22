@@ -1,193 +1,265 @@
-// TIPU! — what everyone else sees while someone takes the gun: the shooter as a character in a
-// spotlight, their profile picture for a face, revolver raised to the temple. It follows the
-// shooter's real phone live (loading, gun up, finger tightening on the trigger), then BANG or *click*.
-import { sfx, vibrate } from './sfx.js?v=3';
-import { sideGunSVG } from './gun.js?v=3';
+// TIPU! — what everyone else sees while someone takes the gun: the shooter as a flat-cartoon
+// 1920s-style character under a spotlight. Their whole head is their profile picture. They wear the
+// outfit they picked in the wardrobe and hold the revolver they picked. The arm follows the shooter's
+// real phone live (gun comes up, finger tightens on the trigger), then BANG or *click*.
+import { sfx, vibrate } from './sfx.js?v=4';
+import { sideGunSVG, muzzleX, GUNS } from './gun.js?v=4';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const ARM_DOWN = 105;     // degrees: gun resting by the hip
-const SHOULDER = [250, 284];
-const MUZZLE = [262, 160];
-let uid = 0;
+const lerp = (a, b, t) => a + (b - a) * t;
+const ease = (t) => t * t * (3 - 2 * t);
 
-// ten looks, one per seat, so nobody at the table looks the same
+// body landmarks (viewBox 0 0 300 680)
+const HEAD = [150, 118], HEAD_R = 62;
+const SHOULDER = [200, 212];
+const L1 = 80, L2 = 76;          // upper arm, forearm
+const GRIP = [275, 400];         // the point on the revolver drawing the hand holds
+const GUN_SCALE = 0.105;
+const DOWN = { w: [214, 396], a: 100 };   // wrist position + gun angle with the gun at the hip
+const TEMPLE = [HEAD[0] + HEAD_R - 2, 112];
+
+// ---------------------------------------------------------------- wardrobe
+// g: m / f · top: suit | shirt | vest | trench | overcoat | dress | pantsuit | melayu | hijabdress
 export const OUTFITS = [
-  { name: 'The Boss', skin: '#c8916b', top: 'suit', c1: '#17181d', c2: '#f2ede4', c3: '#a3141f', hair: 'short', hc: '#1b1310', hat: 'fedora', hatc: '#3a3a40', legs: '#17181d' },
-  { name: 'Lady in Red', skin: '#e0ac88', top: 'dress', c1: '#b3132a', hair: 'long', hc: '#140c0a', jewel: 'necklace', legs: 'skin' },
-  { name: 'The Cowboy', skin: '#b47a55', top: 'plaid', c1: '#8e2a22', c2: '#3a1612', c3: '#6b4423', hair: 'short', hc: '#4a2e18', hat: 'cowboy', hatc: '#a87a45', legs: '#2c4a7a' },
-  { name: 'Hijabi', skin: '#d8a27c', top: 'kurung', c1: '#c9a6e0', c2: '#8a5fb0', hair: 'none', hijab: '#6a3d8f', legs: '#c9a6e0' },
-  { name: 'The Biker', skin: '#f0c4a0', top: 'leather', c1: '#121214', c2: '#2a2a2e', hair: 'spiky', hc: '#5a3a22', legs: '#1e2a44' },
-  { name: 'Bartender', skin: '#8a5a3c', top: 'vest', c1: '#f4f1ea', c2: '#141416', c3: '#b3132a', hair: 'slick', hc: '#0e0a08', legs: '#141416' },
-  { name: 'The Diva', skin: '#f3caa8', top: 'sequin', c1: '#1f9a62', hair: 'bob', hc: '#e8c25a', jewel: 'earrings', legs: 'skin' },
-  { name: 'Hoodie', skin: '#c48a63', top: 'hoodie', c1: '#6b6f78', c2: '#4b4e55', hair: 'ponytail', hc: '#8a3a1c', legs: '#22262e' },
-  { name: 'Baju Melayu', skin: '#b98258', top: 'melayu', c1: '#1f2f6b', c2: '#d6a836', hair: 'short', hc: '#120c08', hat: 'songkok', hatc: '#0c0c0e', legs: '#1f2f6b' },
-  { name: 'The CEO', skin: '#e9b996', top: 'blazer', c1: '#1d2b4f', c2: '#f4f1ea', hair: 'bun', hc: '#3a2214', jewel: 'pearls', legs: '#1d2b4f' },
+  { name: 'Pinstripe Boss', g: 'm', skin: '#d9a27a', top: 'suit', c1: '#45454e', c2: '#f2ede4', c3: '#b3132a', pin: 1, hat: 'fedora', hatc: '#1c1c22', band: '#b3132a', legs: '#45454e' },
+  { name: 'Suspenders', g: 'm', skin: '#c88d63', top: 'shirt', c1: '#f4f0e6', c2: '#b3132a', c3: '#8e1822', hat: 'fedora', hatc: '#5e5e66', band: '#2a2a30', legs: '#7a4a28' },
+  { name: 'Waistcoat', g: 'm', skin: '#e8b48c', top: 'vest', c1: '#f4f0e6', c2: '#56565e', c3: '#a3141f', hat: 'fedora', hatc: '#4a4a52', band: '#1c1c20', legs: '#56565e' },
+  { name: 'Trench Coat', g: 'm', skin: '#b98258', top: 'trench', c1: '#b08a52', c2: '#f2ede4', c3: '#3a2a1c', hat: 'fedora', hatc: '#5a4030', band: '#2a1c12', legs: '#2c2a30' },
+  { name: 'Brown Suit', g: 'm', skin: '#a8734d', top: 'suit', c1: '#5a3a2a', c2: '#f2ede4', c3: '#b3132a', rose: 1, hat: 'fedora', hatc: '#3a2a20', band: '#b3132a', legs: '#5a3a2a' },
+  { name: 'Fur Coat Don', g: 'm', skin: '#e2ad86', top: 'overcoat', c1: '#6a6e76', c2: '#a3141f', c3: '#e6ddcc', hat: 'fedora', hatc: '#3a3a40', band: '#111', legs: '#2a2a30' },
+  { name: 'Green Overcoat', g: 'm', skin: '#8c5a3a', top: 'overcoat', c1: '#2f5a4a', c2: '#f2ede4', c3: '#2f5a4a', hat: 'fedora', hatc: '#24342e', band: '#111', legs: '#1e2622' },
+  { name: 'The Dandy', g: 'm', skin: '#f0c4a0', top: 'suit', c1: '#6a1a2a', c2: '#f4f0e6', c3: '#111', bow: 1, hat: 'boater', hatc: '#e0c070', band: '#111', legs: '#6a1a2a' },
+  { name: 'The Driver', g: 'm', skin: '#c48a63', top: 'vest', c1: '#dfe6ee', c2: '#6a4a30', c3: '#2a3a5a', hat: 'flatcap', hatc: '#6a5a48', legs: '#5a5a62' },
+  { name: 'Baju Melayu', g: 'm', skin: '#b98258', top: 'melayu', c1: '#1f2f6b', c2: '#d6a836', hat: 'songkok', hatc: '#0c0c0e', legs: '#1f2f6b' },
+  { name: 'The Flapper', g: 'f', skin: '#f3caa8', top: 'dress', len: 'short', fringe: 1, c1: '#f2c230', hat: 'feather', hatc: '#111', hair: 'bob', hc: '#141010', legs: 'skin' },
+  { name: 'Lady in Red', g: 'f', skin: '#e0ac88', top: 'dress', len: 'long', c1: '#b3132a', hair: 'waves', hc: '#5a1a10', legs: 'skin', jewel: 'necklace' },
+  { name: 'Blue Pantsuit', g: 'f', skin: '#d8a27c', top: 'pantsuit', c1: '#2a4a8a', c2: '#f4f0e6', hat: 'fedora', hatc: '#1c2a4a', band: '#f4f0e6', hair: 'bob', hc: '#3a2214', legs: '#2a4a8a' },
+  { name: 'Noir Hijab', g: 'f', skin: '#c48a63', top: 'hijabdress', c1: '#c8a040', c2: '#141416', hijab: '#141416', legs: 'skin' },
+  { name: 'Emerald Diva', g: 'f', skin: '#f6d2b4', top: 'dress', len: 'long', sequin: 1, c1: '#1f8a5a', hat: 'cloche', hatc: '#16603e', hair: 'waves', hc: '#e8c25a', legs: 'skin', jewel: 'pearls' },
 ];
 
-const TORSO = 'M124 490 Q110 336 152 276 Q200 258 248 276 Q290 336 276 490 Q200 510 124 490 Z';
+const shade = 'rgba(0,0,0,.2)';
+const sleeveOf = (o) => ({ dress: o.skin, hijabdress: o.c2 }[o.top] || o.c1);
+const cuffOf = (o) => ({ suit: o.c2, pantsuit: o.c2, trench: o.c2, overcoat: o.c2 }[o.top] || null);
+
+function legs(o) {
+  const skinLegs = o.legs === 'skin';
+  const c = skinLegs ? o.skin : o.legs;
+  if (skinLegs) {
+    return `<g class="a-legs">
+      <path d="M124 392 L126 646 L142 646 L148 398 Z M152 398 L158 646 L174 646 L176 392 Z" fill="${c}"/>
+      <path d="M152 398 L158 646 L166 646 L176 392 Z" fill="${shade}"/>
+      <path d="M120 644 l24 0 l2 9 l-28 0 Z M156 644 l24 0 l4 9 l-28 0 Z" fill="#111"/><path d="M142 652 l2 10 M180 652 l3 10" stroke="#111" stroke-width="4"/></g>`;
+  }
+  return `<g class="a-legs">
+    <path d="M108 392 L112 646 L146 646 L148 400 Z M152 400 L154 646 L188 646 L192 392 Z" fill="${c}"/>
+    <path d="M152 400 L154 646 L170 646 L192 392 Z" fill="${shade}"/>
+    <path d="M130 412 L129 640 M172 412 L173 640" stroke="rgba(0,0,0,.18)" stroke-width="2"/>
+    <path d="M108 642 Q104 660 132 660 L146 660 L146 642 Z M154 642 L154 660 L168 660 Q196 660 192 642 Z" fill="#0c0c0e"/></g>`;
+}
+
+function torso(o) {
+  const c1 = o.c1, c2 = o.c2, c3 = o.c3;
+  const M = 'M92 208 Q96 198 114 196 L186 196 Q204 198 208 208 L200 400 Q150 412 100 400 Z';
+  const F = 'M104 208 Q108 198 120 196 L180 196 Q192 198 196 208 L188 300 Q182 340 186 388 Q150 398 114 388 Q118 340 112 300 Z';
+  const rightShade = (bottom) => `<path d="M150 196 L186 196 Q204 198 208 208 L200 ${bottom} Q175 ${bottom + 8} 150 ${bottom + 10} Z" fill="${shade}"/>`;
+  const tie = o.bow ? `<path d="M138 206 L150 212 L162 206 L162 220 L150 214 L138 220 Z" fill="${c3}"/>`
+    : `<path d="M146 204 L154 204 L158 286 L150 300 L142 286 Z" fill="${c3}"/>`;
+  switch (o.top) {
+    case 'suit': {
+      let pin = '';
+      if (o.pin) for (let x = 98; x < 206; x += 9) pin += `<path d="M${x} 200 L${(x + (x - 150) * 0.03).toFixed(1)} 400" stroke="rgba(255,255,255,.13)" stroke-width="1.4"/>`;
+      return `<path d="${M}" fill="${c1}"/>${pin}<path d="M134 198 L150 300 L166 198 Z" fill="${c2}"/>${tie}
+        <path d="M128 198 L150 300 L140 304 L118 220 Z M172 198 L150 300 L160 304 L182 220 Z" fill="rgba(0,0,0,.25)"/>
+        <circle cx="150" cy="330" r="3.5" fill="#111"/><circle cx="150" cy="360" r="3.5" fill="#111"/>
+        <path d="M110 300 L134 300 M166 300 L190 300" stroke="rgba(0,0,0,.25)" stroke-width="3"/>
+        ${o.rose ? '<circle cx="176" cy="232" r="7" fill="#d4142a"/><circle cx="174" cy="230" r="3" fill="#ff4a5e"/>' : ''}${rightShade(400)}`;
+    }
+    case 'pantsuit':
+      return `<path d="${F}" fill="${c1}"/><path d="M134 198 Q150 240 166 198 L162 286 L138 286 Z" fill="${c2}"/>
+        <path d="M128 198 L148 290 L138 296 L118 220 Z M172 198 L152 290 L162 296 L182 220 Z" fill="rgba(0,0,0,.25)"/><circle cx="150" cy="320" r="3.5" fill="#111"/>
+        <path d="M150 196 L180 196 Q192 198 196 208 L188 300 Q182 340 186 388 Q168 394 150 396 Z" fill="${shade}"/>`;
+    case 'shirt':
+      return `<path d="${M}" fill="${c1}"/>${tie}<path d="M118 200 L124 400 M182 200 L176 400" stroke="${c2}" stroke-width="8"/>
+        <path d="M134 198 L150 212 L166 198" stroke="rgba(0,0,0,.2)" stroke-width="3" fill="none"/><path d="M100 388 L200 388" stroke="#2a1a10" stroke-width="10"/>${rightShade(400)}`;
+    case 'vest':
+      return `<path d="${M}" fill="${c1}"/>${tie}
+        <path d="M106 220 Q104 330 106 396 Q128 404 146 404 L146 260 L128 214 Z M194 220 Q196 330 194 396 Q172 404 154 404 L154 260 L172 214 Z" fill="${c2}"/>
+        <circle cx="140" cy="290" r="3" fill="#ddd"/><circle cx="140" cy="320" r="3" fill="#ddd"/><circle cx="140" cy="350" r="3" fill="#ddd"/>
+        <path d="M168 300 q10 4 18 0" stroke="#e7b64a" stroke-width="2" fill="none"/>${rightShade(400)}`;
+    case 'trench':
+      return `<path d="M88 208 Q94 196 114 194 L186 194 Q206 196 212 208 L214 560 Q150 574 86 560 Z" fill="${c1}"/>
+        <path d="M134 196 L150 270 L166 196 Z" fill="${c2}"/>${tie}
+        <path d="M114 196 L150 286 L132 300 L104 222 Z M186 196 L150 286 L168 300 L196 222 Z" fill="rgba(0,0,0,.18)"/>
+        <path d="M90 370 L210 370" stroke="${c3}" stroke-width="12"/><rect x="142" y="362" width="16" height="16" rx="3" fill="none" stroke="#e7b64a" stroke-width="3"/>
+        <path d="M150 286 L150 560" stroke="rgba(0,0,0,.25)" stroke-width="3"/><circle cx="138" cy="320" r="4" fill="#3a2a1c"/><circle cx="162" cy="320" r="4" fill="#3a2a1c"/>
+        <path d="M150 196 L186 194 Q206 196 212 208 L214 560 Q182 568 150 570 Z" fill="${shade}"/>`;
+    case 'overcoat':
+      return `<path d="M88 208 Q94 196 114 194 L186 194 Q206 196 212 208 L212 540 Q150 554 88 540 Z" fill="${c1}"/>
+        <path d="M134 196 L150 260 L166 196 Z" fill="${c2}"/>
+        <path d="M100 200 Q150 230 200 200 L196 232 Q150 270 104 232 Z" fill="${c3}"/>
+        <path d="M150 262 L150 540" stroke="rgba(0,0,0,.3)" stroke-width="3"/><circle cx="140" cy="300" r="4" fill="#111"/><circle cx="140" cy="350" r="4" fill="#111"/><circle cx="140" cy="400" r="4" fill="#111"/>
+        <path d="M150 196 L186 194 Q206 196 212 208 L212 540 Q182 548 150 550 Z" fill="${shade}"/>`;
+    case 'dress': {
+      const hem = o.len === 'long' ? 636 : 520;
+      const D = `M110 208 Q114 198 124 196 L176 196 Q186 198 190 208 L186 300 Q180 340 186 384 Q204 ${hem - 60} 212 ${hem} Q150 ${hem + 14} 88 ${hem} Q96 ${hem - 60} 114 384 Q120 340 114 300 Z`;
+      let deco = '';
+      if (o.fringe) for (let y = 300; y < hem; y += 26) deco += `<path d="M96 ${y} Q150 ${y + 8} 204 ${y}" stroke="rgba(0,0,0,.22)" stroke-width="2" fill="none"/>${Array.from({ length: 14 }, (_, i) => `<path d="M${98 + i * 8} ${y + 2} l0 12" stroke="rgba(120,80,0,.35)" stroke-width="2"/>`).join('')}`;
+      if (o.sequin) for (let y = 210; y < hem; y += 12) for (let x = 90; x < 212; x += 12) deco += `<circle cx="${x + ((y / 12) % 2) * 6}" cy="${y}" r="1.8" fill="rgba(255,255,255,${(0.12 + ((x * y) % 9) / 30).toFixed(2)})"/>`;
+      return `<clipPath id="dr${o.k}"><path d="${D}"/></clipPath><path d="${D}" fill="${c1}"/>
+        <g clip-path="url(#dr${o.k})">${deco}<path d="M150 190 L230 190 L230 ${hem + 20} L150 ${hem + 20} Z" fill="${shade}"/></g>
+        <path d="M128 196 Q150 230 172 196 Z" fill="${o.skin}"/>
+        ${o.fringe ? '' : '<path d="M114 384 Q150 394 186 384" stroke="rgba(0,0,0,.25)" stroke-width="3" fill="none"/>'}`;
+    }
+    case 'hijabdress':
+      return `<path d="M104 208 Q108 198 120 196 L180 196 Q192 198 196 208 L198 380 Q212 520 216 636 Q150 650 84 636 Q88 520 102 380 Z" fill="${c1}"/>
+        <path d="M102 372 L198 372" stroke="${c2}" stroke-width="8"/><path d="M150 196 L180 196 Q192 198 196 208 L198 380 Q212 520 216 636 Q182 644 150 646 Z" fill="${shade}"/>`;
+    case 'melayu':
+      return `<path d="${M}" fill="${c1}"/><path d="M138 196 L162 196 L160 212 L140 212 Z" fill="${c1}" stroke="rgba(255,255,255,.3)" stroke-width="2"/>
+        <path d="M150 212 L150 270" stroke="rgba(255,255,255,.3)" stroke-width="2"/><circle cx="150" cy="228" r="2.5" fill="${c2}"/><circle cx="150" cy="248" r="2.5" fill="${c2}"/>
+        <path d="M98 352 Q150 368 202 352 L208 470 Q150 486 92 470 Z" fill="${c2}"/><path d="M98 380 Q150 396 202 380 M96 420 Q150 436 204 420" stroke="#8a5a10" stroke-width="3" fill="none"/>
+        ${rightShade(352)}`;
+  }
+  return `<path d="${M}" fill="${c1}"/>`;
+}
+
+function jewels(o) {
+  if (o.jewel === 'necklace') return `<path d="M128 200 Q150 232 172 200" stroke="#e7b64a" stroke-width="3" fill="none"/><circle cx="150" cy="224" r="5" fill="#e7b64a"/>`;
+  if (o.jewel === 'pearls') return Array.from({ length: 9 }, (_, i) => { const a = Math.PI * (0.12 + 0.76 * i / 8); return `<circle cx="${(150 - 24 * Math.cos(a)).toFixed(1)}" cy="${(198 + 22 * Math.sin(a)).toFixed(1)}" r="3.6" fill="#f4f1ea" stroke="#bbb" stroke-width=".8"/>`; }).join('');
+  return '';
+}
+
+// the hand that isn't holding the gun: in the pocket for suits and coats, hanging otherwise
+function restArm(o) {
+  const sl = sleeveOf(o);
+  const pocket = ['suit', 'trench', 'overcoat', 'pantsuit'].includes(o.top);
+  if (pocket) return `<path d="M104 212 Q86 260 92 318 Q96 350 114 366" fill="none" stroke="${sl}" stroke-width="22" stroke-linecap="round"/><path d="M104 214 Q90 260 96 316" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="6"/>`;
+  const thin = o.top === 'dress';
+  return `<path d="M102 212 Q84 270 88 330 Q90 360 94 378" fill="none" stroke="${sl}" stroke-width="${thin ? 15 : 21}" stroke-linecap="round"/>
+    <path d="M88 378 Q84 392 88 404 Q92 414 100 412 Q106 410 106 400 L106 384 Q104 374 96 372 Z" fill="${o.skin}"/>
+    <path d="M90 392 L104 392 M90 400 L103 400" stroke="rgba(0,0,0,.18)" stroke-width="1.6"/><path d="M106 386 q6 2 6 10" stroke="${o.skin}" stroke-width="5" stroke-linecap="round" fill="none"/>`;
+}
 
 function hairBack(o) {
-  const c = o.hc;
-  switch (o.hair) {
-    case 'long': return `<path d="M130 176 Q122 92 200 92 Q278 92 270 176 Q282 250 290 318 Q244 334 200 330 Q156 334 110 318 Q118 250 130 176 Z" fill="${c}"/>`;
-    case 'bob': return `<path d="M132 178 Q126 94 200 94 Q274 94 268 178 L274 238 Q240 250 200 246 Q160 250 126 238 Z" fill="${c}"/>`;
-    case 'ponytail': return `<path d="M138 160 Q140 96 200 94 Q260 96 262 160 Z" fill="${c}"/><path d="M252 112 q52 18 44 104 q-4 22 -16 26 q-6 -60 -40 -100 z" fill="${c}"/>`;
-    case 'bun': return `<path d="M138 160 Q140 98 200 96 Q260 98 262 160 Z" fill="${c}"/><circle cx="200" cy="90" r="24" fill="${c}"/>`;
-    case 'short': case 'slick': return `<path d="M136 158 Q138 96 200 94 Q262 96 264 158 Z" fill="${c}"/>`;
-    case 'spiky': return `<path d="M136 158 L132 112 L152 122 L156 92 L176 112 L190 84 L204 108 L222 84 L230 112 L252 94 L250 122 L270 114 L264 158 Z" fill="${c}"/>`;
-    default: return '';
-  }
+  if (o.hair === 'bob') return `<path d="M84 128 Q80 50 150 48 Q220 50 216 128 L220 178 Q186 192 150 190 Q114 192 80 178 Z" fill="${o.hc}"/>`;
+  if (o.hair === 'waves') return `<path d="M84 128 Q78 46 150 46 Q222 46 216 128 Q232 190 222 232 Q204 248 186 238 Q150 250 114 238 Q96 248 78 232 Q68 190 84 128 Z" fill="${o.hc}"/>`;
+  return '';
 }
-function hairFront(o) {
-  const c = o.hc;
-  switch (o.hair) {
-    case 'long': case 'bob': return `<path d="M140 150 Q150 104 200 102 Q252 104 262 150 Q232 126 200 128 Q168 126 140 150 Z" fill="${c}"/>`;
-    case 'slick': return `<path d="M142 140 Q160 102 200 100 Q246 102 260 136 Q226 116 182 122 Q160 126 142 140 Z" fill="${c}"/><path d="M160 118 Q200 104 246 120" stroke="rgba(255,255,255,.25)" stroke-width="3" fill="none"/>`;
-    case 'short': case 'spiky': case 'ponytail': case 'bun': return `<path d="M142 138 Q160 104 200 102 Q240 104 258 138 Q230 120 200 122 Q170 120 142 138 Z" fill="${c}"/>`;
-    default: return '';
-  }
-}
-function hat(o) {
+function hatSVG(o) {
   const c = o.hatc;
-  if (o.hat === 'fedora') return `<path d="M112 116 Q200 96 288 116 Q262 128 200 126 Q138 128 112 116 Z" fill="${c}"/><path d="M146 114 Q144 66 200 64 Q256 66 254 114 Q200 104 146 114 Z" fill="${c}"/><path d="M148 104 Q200 96 252 104 L252 114 Q200 104 148 114 Z" fill="#111"/><path d="M180 70 Q200 80 220 70" stroke="rgba(0,0,0,.35)" stroke-width="4" fill="none"/>`;
-  if (o.hat === 'cowboy') return `<path d="M96 104 Q120 128 200 124 Q280 128 304 104 Q292 132 200 136 Q108 132 96 104 Z" fill="${c}"/><path d="M150 120 Q144 60 176 62 Q200 76 224 62 Q256 60 250 120 Q200 112 150 120 Z" fill="${c}"/><path d="M150 108 Q200 100 250 108 L250 118 Q200 110 150 118 Z" fill="#4a2a12"/>`;
-  if (o.hat === 'songkok') return `<path d="M144 116 L148 70 Q200 60 252 70 L256 116 Q200 106 144 116 Z" fill="${c}"/><path d="M148 72 Q200 62 252 72" stroke="rgba(255,255,255,.18)" stroke-width="3" fill="none"/>`;
+  switch (o.hat) {
+    case 'fedora': return `<path d="M66 72 Q150 52 234 72 Q214 86 150 84 Q86 86 66 72 Z" fill="${c}"/><path d="M98 72 Q92 24 124 18 Q150 30 176 18 Q208 24 202 72 Q150 62 98 72 Z" fill="${c}"/>
+      <path d="M98 64 Q150 54 202 64 L202 74 Q150 64 98 74 Z" fill="${o.band || '#111'}"/><path d="M124 22 Q150 40 176 22" stroke="rgba(0,0,0,.3)" stroke-width="4" fill="none"/><path d="M150 26 Q176 18 196 40 L200 70 Q176 60 150 62 Z" fill="${shade}"/>`;
+    case 'boater': return `<ellipse cx="150" cy="70" rx="86" ry="13" fill="${c}"/><path d="M104 70 L106 36 Q150 28 194 36 L196 70 Q150 62 104 70 Z" fill="${c}"/><path d="M105 52 Q150 44 195 52 L196 64 Q150 56 104 64 Z" fill="${o.band}"/>
+      <path d="M150 30 Q190 32 194 36 L196 70 Q172 64 150 64 Z" fill="${shade}"/>`;
+    case 'flatcap': return `<path d="M90 78 Q86 30 150 28 Q214 30 214 70 Q236 76 236 86 Q190 84 150 82 Q110 84 90 78 Z" fill="${c}"/><path d="M150 30 L150 76" stroke="rgba(0,0,0,.25)" stroke-width="3"/><circle cx="150" cy="30" r="5" fill="${c}"/>`;
+    case 'songkok': return `<path d="M94 80 L98 38 Q150 28 202 38 L206 80 Q150 70 94 80 Z" fill="${c}"/><path d="M98 40 Q150 30 202 40" stroke="rgba(255,255,255,.18)" stroke-width="3" fill="none"/>`;
+    case 'cloche': return `<path d="M82 112 Q76 44 150 40 Q224 44 218 112 Q206 92 150 90 Q94 92 82 112 Z" fill="${c}"/><path d="M84 100 Q150 80 216 100" stroke="rgba(0,0,0,.3)" stroke-width="7" fill="none"/><circle cx="196" cy="88" r="9" fill="#e7b64a"/>`;
+    case 'feather': return `<path d="M88 92 Q150 74 212 92 L212 102 Q150 84 88 102 Z" fill="${c}"/><circle cx="194" cy="88" r="6" fill="#e7b64a"/><path d="M196 86 Q232 30 214 10 Q206 40 190 84 Z" fill="#f4f0e6"/><path d="M200 80 Q218 40 214 14" stroke="#ccc" stroke-width="1.5" fill="none"/>`;
+  }
   return '';
 }
 function hijabBack(o) {
   if (!o.hijab) return '';
-  return `<path d="M120 172 Q118 84 200 82 Q282 84 280 172 Q292 260 262 304 L200 344 L138 304 Q108 260 120 172 Z" fill="${o.hijab}"/>`;
+  return `<path d="M78 120 Q74 44 150 40 Q226 44 222 120 Q232 196 212 238 L150 270 L88 238 Q68 196 78 120 Z" fill="${o.hijab}"/>`;
 }
 function hijabFront(o) {
   if (!o.hijab) return '';
-  return `<circle cx="200" cy="168" r="66" fill="none" stroke="${o.hijab}" stroke-width="10"/><path d="M140 214 Q200 262 260 214 L262 300 Q200 330 138 300 Z" fill="${o.hijab}"/><path d="M150 236 Q200 268 250 236" stroke="rgba(0,0,0,.18)" stroke-width="3" fill="none"/>`;
-}
-function torso(o) {
-  const t = o.top, c1 = o.c1, c2 = o.c2, c3 = o.c3, sk = o.skin;
-  switch (t) {
-    case 'suit': return `<path d="${TORSO}" fill="${c1}"/><path d="M178 268 L200 340 L222 268 Z" fill="${c2}"/><path d="M196 276 L204 276 L210 346 L200 362 L190 346 Z" fill="${c3}"/>
-      <path d="M160 274 L192 352 L176 360 Z M240 274 L208 352 L224 360 Z" fill="rgba(255,255,255,.08)"/><circle cx="200" cy="396" r="4" fill="#333"/><circle cx="200" cy="430" r="4" fill="#333"/>`;
-    case 'vest': return `<path d="${TORSO}" fill="${c1}"/><path d="M150 290 Q160 400 150 484 Q176 500 196 498 L196 300 Z M250 290 Q240 400 250 484 Q224 500 204 498 L204 300 Z" fill="${c2}"/>
-      <path d="M186 278 L200 286 L214 278 L214 294 L200 286 L186 294 Z" fill="${c3}"/><circle cx="200" cy="330" r="3" fill="#ccc"/><circle cx="200" cy="370" r="3" fill="#ccc"/>`;
-    case 'leather': return `<path d="${TORSO}" fill="${c1}"/><path d="M200 268 L200 494" stroke="#777" stroke-width="3" stroke-dasharray="4 3"/><path d="M160 272 L196 320 L176 336 Z M240 272 L204 320 L224 336 Z" fill="${c2}"/>
-      <path d="M140 420 L180 420 M220 420 L260 420" stroke="#555" stroke-width="3"/><path d="M132 340 Q150 330 160 360" stroke="rgba(255,255,255,.12)" stroke-width="6" fill="none"/>`;
-    case 'hoodie': return `<path d="M136 272 Q200 236 264 272 Q240 300 200 296 Q160 300 136 272 Z" fill="${c2}"/><path d="${TORSO}" fill="${c1}"/><path d="M186 284 L182 350 M214 284 L218 350" stroke="#ddd" stroke-width="3"/>
-      <path d="M150 410 Q200 400 250 410 L240 464 Q200 470 160 464 Z" fill="${c2}"/>`;
-    case 'dress': return `<path d="${TORSO}" fill="${c1}"/><path d="M168 268 Q200 312 232 268 Z" fill="${sk}"/><path d="M118 470 Q200 500 282 470 L300 556 Q200 580 100 556 Z" fill="${c1}"/><path d="M160 276 Q200 300 240 276" stroke="rgba(0,0,0,.25)" stroke-width="3" fill="none"/>`;
-    case 'sequin': {
-      let dots = '';
-      for (let y = 290; y < 560; y += 14) for (let x = 120; x < 290; x += 14) dots += `<circle cx="${x + ((y / 14) % 2) * 7}" cy="${y}" r="2.2" fill="rgba(255,255,255,${(0.15 + ((x * y) % 7) / 20).toFixed(2)})"/>`;
-      return `<clipPath id="seq${o.k}"><path d="${TORSO} M118 470 Q200 500 282 470 L296 556 Q200 580 104 556 Z"/></clipPath>
-        <path d="${TORSO}" fill="${c1}"/><path d="M118 470 Q200 500 282 470 L296 556 Q200 580 104 556 Z" fill="${c1}"/><path d="M176 268 Q200 300 224 268 Z" fill="${sk}"/><g clip-path="url(#seq${o.k})">${dots}</g>`;
-    }
-    case 'kurung': return `<path d="M120 500 Q106 336 152 276 Q200 258 248 276 Q294 336 280 500 L292 560 Q200 578 108 560 Z" fill="${c1}"/><path d="M200 300 L200 360" stroke="${c2}" stroke-width="3"/>
-      ${[0, 1, 2, 3].map((i) => `<circle cx="${150 + i * 34}" cy="${430 + (i % 2) * 40}" r="7" fill="${c2}" opacity=".6"/>`).join('')}`;
-    case 'melayu': return `<path d="${TORSO}" fill="${c1}"/><path d="M182 264 L218 264 L216 280 L184 280 Z" fill="${c1}" stroke="rgba(255,255,255,.25)" stroke-width="2"/><path d="M200 280 L200 340" stroke="rgba(255,255,255,.3)" stroke-width="2"/>
-      <circle cx="200" cy="300" r="3" fill="${c2}"/><circle cx="200" cy="320" r="3" fill="${c2}"/><path d="M118 444 Q200 462 282 444 L288 540 Q200 560 112 540 Z" fill="${c2}"/>
-      <path d="M118 470 Q200 488 282 470 M116 500 Q200 518 284 500" stroke="#8a5a10" stroke-width="3" fill="none"/>`;
-    case 'plaid': {
-      let lines = '';
-      for (let x = 110; x < 300; x += 22) lines += `<path d="M${x} 250 L${x} 520" stroke="${c2}" stroke-width="6" opacity=".55"/>`;
-      for (let y = 280; y < 520; y += 22) lines += `<path d="M100 ${y} L300 ${y}" stroke="${c2}" stroke-width="6" opacity=".55"/>`;
-      return `<clipPath id="pl${o.k}"><path d="${TORSO}"/></clipPath><path d="${TORSO}" fill="${c1}"/><g clip-path="url(#pl${o.k})">${lines}</g>
-        <path d="M148 290 Q158 400 148 486 Q176 500 190 498 L186 300 Z M252 290 Q242 400 252 486 Q224 500 210 498 L214 300 Z" fill="${c3}"/><path d="M182 268 L200 290 L218 268" stroke="${c2}" stroke-width="5" fill="none"/>`;
-    }
-    case 'blazer': return `<path d="${TORSO}" fill="${c1}"/><path d="M178 268 Q200 300 222 268 L218 360 L182 360 Z" fill="${c2}"/><path d="M160 274 L190 360 L172 372 Z M240 274 L210 360 L228 372 Z" fill="rgba(255,255,255,.1)"/>`;
-  }
-  return `<path d="${TORSO}" fill="${c1}"/>`;
-}
-function jewels(o) {
-  if (o.jewel === 'necklace') return `<path d="M172 272 Q200 304 228 272" stroke="#e7b64a" stroke-width="3" fill="none"/><circle cx="200" cy="298" r="6" fill="#e7b64a"/>`;
-  if (o.jewel === 'pearls') return `${Array.from({ length: 9 }, (_, i) => { const a = Math.PI * (0.15 + 0.7 * i / 8); return `<circle cx="${(200 - 30 * Math.cos(a)).toFixed(1)}" cy="${(268 + 24 * Math.sin(a)).toFixed(1)}" r="4" fill="#f4f1ea" stroke="#bbb"/>`; }).join('')}`;
-  return '';
-}
-const sleeve = (o) => (o.top === 'dress' || o.top === 'sequin' ? o.skin : o.c1);
-const legC = (o) => (o.legs === 'skin' ? o.skin : o.legs);
-
-// a fist around the grip, index finger on the trigger, thumb up on the hammer side
-function fistSVG(sk) {
-  return `<g class="a-fist">
-    <path d="M340 172 q-8 0 -9 9 l-1 22 q1 10 11 11 l14 1 q10 0 11 -10 l1 -24 q-1 -9 -10 -9 Z" fill="${sk}" stroke="rgba(0,0,0,.35)" stroke-width="2"/>
-    <path d="M331 186 l12 0 M331 196 l12 0 M332 206 l11 0" stroke="rgba(0,0,0,.3)" stroke-width="2" stroke-linecap="round"/>
-    <path d="M334 178 q-6 -2 -10 2" stroke="${sk}" stroke-width="6" stroke-linecap="round" fill="none"/>
-    <path d="M362 176 q6 -8 2 -16" stroke="${sk}" stroke-width="8" stroke-linecap="round" fill="none"/></g>`;
-}
-function restHandSVG(sk) {
-  return `<path d="M158 448 q12 -10 30 -6 q12 4 12 14 q-2 10 -12 12 l-26 2 q-10 0 -10 -9 Z" fill="${sk}" stroke="rgba(0,0,0,.3)" stroke-width="2"/>
-    <path d="M176 450 l4 18 M186 448 l4 19 M194 450 l2 16" stroke="rgba(0,0,0,.25)" stroke-width="2" fill="none"/>`;
+  return `<circle cx="${HEAD[0]}" cy="${HEAD[1]}" r="${HEAD_R + 5}" fill="none" stroke="${o.hijab}" stroke-width="12"/><path d="M96 168 Q150 222 204 168 L210 250 Q150 282 90 250 Z" fill="${o.hijab}"/>`;
 }
 
-function sceneSVG(o, id, gun) {
-  o = { ...o, k: id };
+// the gun hand: fist round the grip, index finger on the trigger, thumb over the back
+function fist(o) {
   const sk = o.skin;
-  const face = o.photo
-    ? `<image href="${o.photo}" x="138" y="106" width="124" height="124" clip-path="url(#aFace${id})" preserveAspectRatio="xMidYMid slice"/>`
-    : `<circle cx="200" cy="168" r="62" fill="${sk}"/><text x="200" y="192" font-size="66" text-anchor="middle">${esc(o.emoji || '🙂')}</text>`;
-  const legs = legC(o);
-  const heels = o.legs === 'skin';
-  return `<svg class="a-svg" viewBox="0 0 400 620" xmlns="http://www.w3.org/2000/svg">
+  return `<rect x="-11" y="-13" width="23" height="24" rx="7" fill="${sk}"/>
+    <path d="M-10 -5 L5 -5 M-10 1 L5 1 M-9 7 L5 7" stroke="rgba(0,0,0,.2)" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M6 -10 Q12 -9 13 -5" stroke="${sk}" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+    <path d="M-6 -12 Q-4 -19 3 -19" stroke="${sk}" stroke-width="6" stroke-linecap="round" fill="none"/>`;
+}
+
+// two-bone arm: the wrist travels from the hip to the temple, the elbow bends outwards
+function armPose(t, gunKind) {
+  const k = ease(clamp(t, 0, 1));
+  const muzz = [(muzzleX(gunKind) - GRIP[0]) * GUN_SCALE, (178 - GRIP[1]) * GUN_SCALE];
+  // pointing left (180°) with the drawing flipped so the grip stays down: muzzle sits at (-mx, +my) from the wrist
+  const wUp = [TEMPLE[0] + muzz[0], TEMPLE[1] - muzz[1]];
+  const w = [lerp(DOWN.w[0], wUp[0], k), lerp(DOWN.w[1], wUp[1], k)];
+  const ang = lerp(DOWN.a, 180, k);
+  const dx = w[0] - SHOULDER[0], dy = w[1] - SHOULDER[1];
+  const d = clamp(Math.hypot(dx, dy), 1, L1 + L2 - 0.5);
+  const base = Math.atan2(dy, dx);
+  const alpha = Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+  const e = [SHOULDER[0] + L1 * Math.cos(base + alpha), SHOULDER[1] + L1 * Math.sin(base + alpha)];
+  const a = ang * Math.PI / 180;
+  const mx = muzz[0], my = -muzz[1];
+  const m = [w[0] + mx * Math.cos(a) - my * Math.sin(a), w[1] + mx * Math.sin(a) + my * Math.cos(a)];
+  return { w, e, ang, m };
+}
+const handTf = (w, ang) => `translate(${w[0].toFixed(1)} ${w[1].toFixed(1)}) rotate(${ang.toFixed(1)}) scale(1 -1)`;
+
+export function lookOf(outfit) { return OUTFITS[((outfit ?? 0) % OUTFITS.length + OUTFITS.length) % OUTFITS.length]; }
+
+// the whole character as one SVG (wardrobe previews use it too)
+export function characterSVG(look, id, { pose = 'up' } = {}) {
+  const o = { ...lookOf(look.outfit), k: id };
+  const gunKind = GUNS[look.gun] ? look.gun : 'classic';
+  const gun = sideGunSVG('_c' + id, gunKind).replace(/<svg class="g-side"[^>]*>/, '<svg x="0" y="0" width="1000" height="560" viewBox="0 0 1000 560" overflow="visible">');
+  const face = look.photo
+    ? `<image href="${look.photo}" x="${HEAD[0] - HEAD_R}" y="${HEAD[1] - HEAD_R}" width="${HEAD_R * 2}" height="${HEAD_R * 2}" clip-path="url(#cFace${id})" preserveAspectRatio="xMidYMid slice"/>`
+    : `<circle cx="${HEAD[0]}" cy="${HEAD[1]}" r="${HEAD_R}" fill="${o.skin}"/><text x="${HEAD[0]}" y="${HEAD[1] + 40}" font-size="116" text-anchor="middle">${esc(look.emoji || '🙂')}</text>`;
+  const sl = sleeveOf(o), cuff = cuffOf(o);
+  const arm = armPose(pose === 'up' ? 1 : 0, gunKind);
+  const thin = o.top === 'dress';
+  return `<svg class="a-svg" viewBox="0 0 300 680" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <clipPath id="aFace${id}"><circle cx="200" cy="168" r="62"/></clipPath>
-    <radialGradient id="aShade${id}" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#fff" stop-opacity=".2"/><stop offset=".6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".45"/></radialGradient>
-    <radialGradient id="aBody${id}" cx=".3" cy=".25" r="1"><stop offset="0" stop-color="#fff" stop-opacity=".12"/><stop offset=".6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".45"/></radialGradient>
-    <radialGradient id="aFlash${id}" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff"/><stop offset=".35" stop-color="#ffe9a0"/><stop offset=".7" stop-color="#ff8a1f" stop-opacity=".8"/><stop offset="1" stop-color="#ff3d00" stop-opacity="0"/></radialGradient>
+    <clipPath id="cFace${id}"><circle cx="${HEAD[0]}" cy="${HEAD[1]}" r="${HEAD_R}"/></clipPath>
+    <radialGradient id="cShade${id}" cx=".35" cy=".3" r=".85"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset=".65" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".35"/></radialGradient>
+    <radialGradient id="cFlash${id}" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff"/><stop offset=".35" stop-color="#ffe9a0"/><stop offset=".7" stop-color="#ff8a1f" stop-opacity=".8"/><stop offset="1" stop-color="#ff3d00" stop-opacity="0"/></radialGradient>
   </defs>
-  <ellipse class="a-shadow" cx="200" cy="592" rx="150" ry="18" fill="rgba(0,0,0,.6)"/>
-  <g stroke="#3b1d10" stroke-width="10" stroke-linecap="round"><path d="M140 522 L118 592 M260 522 L282 592 M200 527 L200 594"/></g>
-  <ellipse cx="200" cy="516" rx="96" ry="20" fill="#5a2c14" stroke="#2a1006" stroke-width="5"/>
+  <ellipse class="a-shadow" cx="150" cy="664" rx="96" ry="12" fill="rgba(0,0,0,.55)"/>
   <g class="a-fig">
-    <!-- legs -->
-    <path d="M160 480 L150 566 M240 480 L252 566" stroke="${legs}" stroke-width="${heels ? 22 : 36}" stroke-linecap="round"/>
-    ${heels ? '<path d="M140 572 l22 0 l-4 10 M240 572 l22 0 l4 10" stroke="#111" stroke-width="7" stroke-linecap="round" fill="none"/>' : '<path d="M132 574 l-26 6 M268 574 l26 6" stroke="#0b0b0d" stroke-width="15" stroke-linecap="round"/>'}
-    <g transform="translate(0 16)">${hijabBack(o)}</g>
-    <!-- neck + body -->
-    <path d="M186 226 L214 226 L216 266 Q200 274 184 266 Z" fill="${sk}"/><path d="M188 252 Q200 258 212 252" stroke="rgba(0,0,0,.18)" stroke-width="4" fill="none"/>
-    ${torso(o)}
-    <path d="${TORSO}" fill="url(#aBody${id})"/>
-    ${jewels(o)}
-    <!-- resting arm -->
-    <path d="M150 286 C122 312 112 372 122 418 C128 444 148 454 166 452" fill="none" stroke="${sleeve(o)}" stroke-width="30" stroke-linecap="round"/>
-    ${restHandSVG(sk)}
-    <!-- head -->
-    <g class="a-head"><g transform="translate(0 16)">
-      ${hairBack(o)}
-      <ellipse cx="137" cy="172" rx="10" ry="14" fill="${sk}"/><ellipse cx="263" cy="172" rx="10" ry="14" fill="${sk}"/>
-      ${o.jewel === 'earrings' ? '<circle cx="136" cy="190" r="5" fill="#e7b64a"/><circle cx="264" cy="190" r="5" fill="#e7b64a"/>' : ''}
-      <circle cx="200" cy="168" r="65" fill="#0e0405"/>
-      ${face}
-      <circle cx="200" cy="168" r="62" fill="url(#aShade${id})"/>
-      ${hijabFront(o)}${hairFront(o)}${hat(o)}
-      <g class="a-sweat"><path d="M154 126 q-6 12 0 16 q6 -4 0 -16 Z" fill="#bfe7ff"/><path d="M244 116 q-5 10 0 13 q5 -3 0 -13 Z" fill="#bfe7ff"/></g>
-    </g></g>
-    <!-- gun arm -->
-    <g class="a-arm">
-      <path d="M250 286 Q318 294 342 270 Q358 252 352 230" fill="none" stroke="${sleeve(o)}" stroke-width="28" stroke-linecap="round"/>
-      <g transform="translate(0 16)"><g class="a-gun"><g transform="translate(379.8 138.6) scale(-0.12 0.12)">${gun}</g></g>
-      ${fistSVG(sk)}
-      <g class="a-flash" opacity="0"><circle cx="${MUZZLE[0]}" cy="${MUZZLE[1]}" r="46" fill="url(#aFlash${id})"/></g>
-    </g></g>
+    ${legs(o)}
+    <g class="a-upper">
+      ${hijabBack(o)}${hairBack(o)}
+      <path d="M138 172 L162 172 L164 204 Q150 210 136 204 Z" fill="${o.skin}"/><path d="M138 192 Q150 198 162 192" stroke="rgba(0,0,0,.18)" stroke-width="3" fill="none"/>
+      ${torso(o)}${jewels(o)}
+      ${restArm(o)}
+      <g class="a-head">
+        <circle cx="${HEAD[0]}" cy="${HEAD[1]}" r="${HEAD_R + 3}" fill="#120708"/>
+        ${face}
+        <circle cx="${HEAD[0]}" cy="${HEAD[1]}" r="${HEAD_R}" fill="url(#cShade${id})"/>
+        ${hijabFront(o)}${hatSVG(o)}
+        <g class="a-sweat" style="opacity:0"><path d="M96 88 q-6 12 0 16 q6 -4 0 -16 Z" fill="#bfe7ff"/><path d="M110 70 q-5 10 0 13 q5 -3 0 -13 Z" fill="#bfe7ff"/></g>
+      </g>
+      <g class="a-arm">
+        <line class="a-up" x1="${SHOULDER[0]}" y1="${SHOULDER[1]}" x2="${arm.e[0].toFixed(1)}" y2="${arm.e[1].toFixed(1)}" stroke="${sl}" stroke-width="${thin ? 15 : 22}" stroke-linecap="round"/>
+        <line class="a-fore" x1="${arm.e[0].toFixed(1)}" y1="${arm.e[1].toFixed(1)}" x2="${arm.w[0].toFixed(1)}" y2="${arm.w[1].toFixed(1)}" stroke="${sl}" stroke-width="${thin ? 13 : 19}" stroke-linecap="round"/>
+        <g class="a-hand" transform="${handTf(arm.w, arm.ang)}">
+          <g transform="scale(${GUN_SCALE}) translate(${-GRIP[0]} ${-GRIP[1]})"><g class="a-gun">${gun}</g></g>
+          ${cuff ? `<path d="M-14 6 L-14 -10" stroke="${cuff}" stroke-width="6" stroke-linecap="round"/>` : ''}
+          ${fist(o)}
+        </g>
+        <g class="a-flash" opacity="0" transform="translate(${arm.m[0].toFixed(1)} ${arm.m[1].toFixed(1)})"><circle cx="0" cy="0" r="40" fill="url(#cFlash${id})"/></g>
+      </g>
+    </g>
   </g>
 </svg>`;
 }
 
-function miniGun(id) {
-  // the real revolver art, embedded as an inner drawing
-  return sideGunSVG('_a' + id).replace(/<svg class="g-side"[^>]*>/, '<svg x="0" y="0" width="1000" height="560" viewBox="0 0 1000 560" overflow="visible">');
-}
-
 export class Actor {
-  // opts: { name, photo, emoji, pulls, bullets, extra, onResult(dead) }
+  // opts: { name, photo, emoji, outfit, gun, pulls, bullets, extra, onResult(dead) }
   constructor(opts) {
     this.o = opts;
     this.watch = true;
-    this.id = ++uid;
+    this.id = 'a' + Math.random().toString(36).slice(2, 8);
+    this.gunKind = GUNS[opts.gun] ? opts.gun : 'classic';
     this.stage = 'load';
     this.result = null;
     this.live = null;
-    this.arm = ARM_DOWN; this.armTo = ARM_DOWN;
+    this.t = 0; this.tTo = 0;
     this.trig = 0; this.cocked = false;
-    this.fall = 0; this.headKick = 0;
+    this.drop = 0; this.headKick = 0; this.slump = 0;
     this.mount();
   }
 
@@ -204,7 +276,7 @@ export class Actor {
           <div class="g-pct">Pull #${(o.pulls || 0) + 1} · <b>${o.bullets || 1} in 6</b> chance</div></div>
         ${o.extra ? `<div class="g-extra">${o.extra}</div>` : ''}
       </div>
-      <div class="a-stage"><div class="a-spot"></div><div class="a-wrap">${sceneSVG({ ...OUTFITS[(o.outfit || 0) % OUTFITS.length], photo: o.photo, emoji: o.emoji }, this.id, miniGun(this.id))}</div><div class="a-blood"></div><div class="a-ghost">👻</div></div>
+      <div class="a-stage"><div class="a-spot"></div><div class="a-wrap">${characterSVG(o, this.id, { pose: 'down' })}</div><div class="a-blood"></div><div class="a-ghost">👻</div></div>
       <div class="g-hint"></div>
       <div class="g-white"></div>
       <div class="g-result"></div>
@@ -212,7 +284,7 @@ export class Actor {
     document.body.appendChild(el);
     this.el = el;
     this.q = (s) => el.querySelector(s);
-    this.armG = this.q('.a-arm'); this.headG = this.q('.a-head'); this.figG = this.q('.a-fig'); this.gunG = this.q('.a-gun');
+    this.parts = { up: this.q('.a-up'), fore: this.q('.a-fore'), hand: this.q('.a-hand'), flash: this.q('.a-flash'), head: this.q('.a-head'), upper: this.q('.a-upper'), legs: this.q('.a-legs'), sweat: this.q('.a-sweat'), hammer: this.q('.a-gun .g-hammer'), trigger: this.q('.a-gun .g-trigger') };
     el.addEventListener('click', (e) => { const b = e.target.closest('[data-g]'); if (b) { e.stopPropagation(); el.classList.toggle('mini'); } });
     el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300 });
     this.hint('Loading the gun…');
@@ -226,7 +298,7 @@ export class Actor {
   raise() {
     if (this.stage !== 'load') return;
     this.stage = 'closed';
-    this.armTo = 0;
+    this.tTo = 1;
     sfx.play('close');
     this.hint('Gun to the head…');
     this.heartT = setInterval(() => { if (this.stage === 'closed' && this.trig > 0.15) sfx.play('heart'); }, 950);
@@ -239,7 +311,7 @@ export class Actor {
       if (m.ck && !this.cocked) { this.cocked = true; sfx.play('cock'); }
       this.trig = m.tr || 0;
       if (this.trig > 0.05) this.hint('Finger on the trigger…');
-      if (Math.abs(m.w || 0) > 300) this.hint('Spinning the cylinder…');
+      else if (Math.abs(m.w || 0) > 300) this.hint('Spinning the cylinder…');
     }
     if (m.st === 'fired' && this.stage === 'closed') { this.stage = 'fired'; this.trig = 1; this.hint(''); }
   }
@@ -254,9 +326,9 @@ export class Actor {
     if (this.auto) return;
     this.auto = true;
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    if (this.stage === 'load') { await wait(500); this.raise(); }
+    if (this.stage === 'load') { await wait(400); this.raise(); }
     await wait(1100);
-    for (let k = 0; k <= 10; k++) { this.trig = k / 10; await wait(70); }
+    for (let k = 0; k <= 10; k++) { this.trig = k / 10; await wait(60); }
     this.stage = 'fired';
     if (dead !== null) this.showResult(dead);
   }
@@ -273,16 +345,15 @@ export class Actor {
       sfx.play('bang');
       vibrate([400, 60, 200]);
       this.el.classList.add('bang');
-      this.q('.a-flash').animate([{ opacity: 1, transform: 'scale(.5)' }, { opacity: 1, transform: 'scale(1.4)', offset: 0.3 }, { opacity: 0, transform: 'scale(1.8)' }], { duration: 200 });
+      this.flashAt = performance.now();
       this.q('.g-white').animate([{ opacity: 0.9 }, { opacity: 0 }], { duration: 450, easing: 'ease-out' });
       this.el.animate([0, 1, 2, 3, 4, 5, 6].map((i) => ({ transform: i === 6 ? 'none' : `translate(${(Math.random() - 0.5) * 30}px, ${(Math.random() - 0.5) * 30}px)` })), { duration: 380 });
       this.headKick = 1;
       this.splat();
-      // the gun drops, the body goes over
-      this.gunG.animate([{ transform: 'translate(0,0) rotate(0)' }, { transform: 'translate(70px, 380px) rotate(320deg)' }], { duration: 900, easing: 'cubic-bezier(.4,0,.8,.6)', fill: 'forwards' });
-      const t0 = performance.now();
-      const fallStep = () => { if (!this.el) return; const k = Math.min(1, (performance.now() - t0) / 900); this.fall = k * k; this.armTo = 60; if (k < 1) requestAnimationFrame(fallStep); };
-      setTimeout(fallStep, 180);
+      this.gunFall = performance.now() + 120;
+      const t0 = performance.now() + 150;
+      const step = () => { if (!this.el) return; const k = clamp((performance.now() - t0) / 800, 0, 1); this.drop = k * k; if (k < 1) requestAnimationFrame(step); };
+      requestAnimationFrame(step);
       setTimeout(() => sfx.play('death'), 700);
       setTimeout(() => { if (!this.el) return; this.el.classList.add('dead'); this.q('.a-ghost').classList.add('on'); sfx.play('ghost'); }, 1300);
       setTimeout(() => {
@@ -294,12 +365,11 @@ export class Actor {
       sfx.play('dry');
       vibrate(25);
       this.el.classList.add('click');
-      this.gunG.animate([{ transform: 'translate(0,0)' }, { transform: 'translate(3px,-2px)' }, { transform: 'none' }], { duration: 120 });
       setTimeout(() => sfx.play('heart'), 450);
       setTimeout(() => {
         if (!this.el) return;
         sfx.play('relief');
-        this.armTo = ARM_DOWN; this.trig = 0; this.slump = 1;
+        this.tTo = 0; this.trig = 0; this.slump = 1;
         this.el.classList.add('alive');
         res.innerHTML = `<div class="r-big small">*click*</div><div class="r-txt">${name} lives</div><div class="r-sub">Still ${this.o.bullets || 1} in 6 next time.</div>`;
         res.classList.add('on');
@@ -310,9 +380,11 @@ export class Actor {
 
   splat() {
     const box = this.q('.a-blood');
-    const r = this.q('.a-svg').getBoundingClientRect();
-    const sx = r.width / 400;
-    const x = r.left + 138 * sx - box.getBoundingClientRect().left, y = r.top + 181 * sx - box.getBoundingClientRect().top;
+    const svg = this.q('.a-svg');
+    const r = svg.getBoundingClientRect(), b = box.getBoundingClientRect();
+    const s = r.height / 680;
+    const ox = r.left + (r.width - 300 * s) / 2;
+    const x = ox + (HEAD[0] - HEAD_R + 6) * s - b.left, y = r.top + HEAD[1] * s - b.top;
     for (let i = 0; i < 22; i++) {
       const d = document.createElement('i');
       const sz = 4 + Math.random() * 10;
@@ -324,23 +396,43 @@ export class Actor {
     }
   }
 
-  frame(t) {
-    const dt = Math.min(0.05, (t - this.last) / 1000);
-    this.last = t;
-    this.arm += (this.armTo - this.arm) * Math.min(1, dt * (this.armTo < this.arm ? 4.5 : 3));
-    const fear = this.stage === 'closed' || this.stage === 'fired' ? 0.6 + this.trig * 3.4 : this.stage === 'load' ? 0.4 : 0;
+  frame(now) {
+    const dt = Math.min(0.05, (now - this.last) / 1000);
+    this.last = now;
+    this.t += (this.tTo - this.t) * Math.min(1, dt * (this.tTo < this.t ? 2.5 : 3.2));
+    const P = this.parts;
+    const arm = armPose(this.t, this.gunKind);
+    const fear = this.stage === 'closed' || this.stage === 'fired' ? 0.5 + this.trig * 3 : this.stage === 'load' ? 0.3 : 0;
     const sx = (Math.random() - 0.5) * fear, sy = (Math.random() - 0.5) * fear;
-    this.armG.setAttribute('transform', `rotate(${(this.arm + sx * 0.6).toFixed(2)} ${SHOULDER[0]} ${SHOULDER[1]}) translate(${sx.toFixed(2)} ${sy.toFixed(2)})`);
-    const tilt = -this.trig * 7 - this.headKick * 32 + (this.slump || 0) * 9;
-    if (this.headKick) this.headKick = Math.max(0.6, this.headKick - dt * 0.3);
+    const w = [arm.w[0] + sx, arm.w[1] + sy];
+    P.up.setAttribute('x2', arm.e[0].toFixed(1)); P.up.setAttribute('y2', arm.e[1].toFixed(1));
+    P.fore.setAttribute('x1', arm.e[0].toFixed(1)); P.fore.setAttribute('y1', arm.e[1].toFixed(1));
+    P.fore.setAttribute('x2', w[0].toFixed(1)); P.fore.setAttribute('y2', w[1].toFixed(1));
+    if (this.gunFall && now > this.gunFall) {
+      // the gun falls out of the hand
+      const k = Math.min(1, (now - this.gunFall) / 900);
+      if (!this.fallFrom) this.fallFrom = w.slice();
+      P.hand.setAttribute('transform', `translate(${(this.fallFrom[0] + 40 * k).toFixed(1)} ${(this.fallFrom[1] + 430 * k * k).toFixed(1)}) rotate(${(180 + 300 * k).toFixed(1)}) scale(1 -1)`);
+    } else P.hand.setAttribute('transform', handTf(w, arm.ang));
+    P.flash.setAttribute('transform', `translate(${arm.m[0].toFixed(1)} ${arm.m[1].toFixed(1)})`);
+    if (this.flashAt) {
+      const k = (now - this.flashAt) / 200;
+      P.flash.setAttribute('opacity', k < 1 ? (1 - k * 0.6).toFixed(2) : '0');
+      P.flash.setAttribute('transform', `translate(${arm.m[0].toFixed(1)} ${arm.m[1].toFixed(1)}) scale(${(0.6 + Math.min(1, k) * 1.4).toFixed(2)})`);
+      if (k >= 1) this.flashAt = 0;
+    }
+    const tilt = -this.trig * 6 - this.headKick * 30 + this.slump * 10;
+    if (this.headKick) this.headKick = Math.max(0.55, this.headKick - dt * 0.3);
     if (this.slump) this.slump = Math.max(0, this.slump - dt * 0.35);
-    this.headG.setAttribute('transform', `rotate(${tilt.toFixed(2)} 200 252) translate(${(-this.headKick * 14).toFixed(1)} 0)`);
-    this.figG.setAttribute('transform', `rotate(${(-this.fall * 28).toFixed(2)} 220 530) translate(${(this.fall * 12).toFixed(1)} ${(this.fall * 34).toFixed(1)})`);
-    this.q('.a-sweat').style.opacity = this.stage === 'closed' || this.stage === 'fired' ? clamp(0.3 + this.trig, 0, 1) : 0;
-    const hm = this.q('.a-gun .g-hammer');
-    if (hm) hm.setAttribute('transform', `rotate(${(-34 * Math.max(this.cocked ? 1 : 0, this.trig)).toFixed(1)} 286 196)`);
-    const tg = this.q('.a-gun .g-trigger');
-    if (tg) tg.setAttribute('transform', `rotate(${(24 * this.trig).toFixed(1)} 377 300)`);
+    P.head.setAttribute('transform', `rotate(${tilt.toFixed(2)} ${HEAD[0]} 182) translate(${(-this.headKick * 12).toFixed(1)} 0)`);
+    // dead: the knees go (legs fold down to the floor), the body drops and keels over
+    if (this.drop) {
+      P.legs.setAttribute('transform', `translate(0 ${(660 * 0.45 * this.drop).toFixed(1)}) scale(1 ${(1 - 0.45 * this.drop).toFixed(3)})`);
+      P.upper.setAttribute('transform', `translate(0 ${(118 * this.drop).toFixed(1)}) rotate(${(-24 * this.drop).toFixed(1)} 150 400)`);
+    }
+    if (P.sweat) P.sweat.style.opacity = this.stage === 'closed' || this.stage === 'fired' ? clamp(0.3 + this.trig, 0, 1) : 0;
+    if (P.hammer) P.hammer.setAttribute('transform', `rotate(${(-34 * Math.max(this.cocked ? 1 : 0, this.trig)).toFixed(1)} 286 196)`);
+    if (P.trigger) P.trigger.setAttribute('transform', `rotate(${(24 * this.trig).toFixed(1)} 377 300)`);
   }
 
   destroy() {

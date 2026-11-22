@@ -1,26 +1,26 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>TIPU! outfits</title>
-<link rel="stylesheet" href="../css/style.css?v=3">
+<link rel="stylesheet" href="../css/style.css?v=4">
 <style>
   body { overflow: auto; padding: 12px; }
   #grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-  #grid > div { position: relative; height: 330px; border: 1px solid #ffffff22; border-radius: 12px; overflow: hidden; }
+  #grid > div { position: relative; height: 360px; border: 1px solid #ffffff22; border-radius: 12px; overflow: hidden; }
   #grid #gun { position: absolute !important; inset: 0; }
   #grid .g-top, #grid .g-x, #grid .g-hint { display: none; }
   #grid .a-stage { top: 2%; bottom: 2%; }
 </style>
-<p style="color:#fff">All 10 outfits (one per seat). Dev check page.</p>
+<p style="color:#fff">All 15 outfits (one per seat). Dev check page.</p>
 <div id="grid"></div>
 <script type="module">
 // Renders every outfit with the gun raised, so they can be checked side by side.
-import { Actor, OUTFITS } from '../js/actor.js?v=3';
+import { Actor, OUTFITS } from '../js/actor.js?v=4';
 const grid = document.getElementById('grid');
-const faces = ['😎', '💃', '🤠', '🧕', '🧔', '🧑', '👩', '🧑‍🦰', '👨', '👩‍💼'];
+const faces = ['😎', '🧔', '🧑', '🕵️', '👨', '🤵', '🧓', '🎩', '🧑‍🦱', '👨‍🦳', '💃', '👩', '👩‍💼', '🧕', '👸'];
 OUTFITS.forEach((o, i) => {
   const cell = document.createElement('div');
   grid.appendChild(cell);
-  const a = new Actor({ name: o.name, emoji: faces[i], outfit: i, bullets: 1, pulls: 0 });
+  const a = new Actor({ name: o.name, emoji: faces[i], outfit: i, gun: ['classic', 'nickel', 'gold', 'snub', 'pearl'][i % 5], bullets: 1, pulls: 0 });
   cell.appendChild(a.el);
   a.raise();
 });

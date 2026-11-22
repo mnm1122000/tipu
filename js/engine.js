@@ -21,6 +21,9 @@ export const RANKS = ['K', 'Q', 'A'];
 export const RANK_NAME = { K: 'King', Q: 'Queen', A: 'Ace', J: 'Joker', D: 'Devil' };
 export const RANK_PLURAL = { K: 'Kings', Q: 'Queens', A: 'Aces' };
 export const TIMERS = [0, 20, 30, 45];
+export const MODES = ['classic', 'party', 'chaos'];
+export const OUTFIT_COUNT = 15;
+export const GUN_KINDS = ['classic', 'nickel', 'gold', 'snub', 'pearl'];
 export const STREAK = 3;           // honest-when-called / caught-lying count that moves a bullet
 export const READ_STREAK = 2;      // right reads (bets) in a row-ish that take a bullet away
 export const MIN_BULLETS = 1, MAX_BULLETS = 5;
@@ -82,16 +85,24 @@ export class Game {
   static create(code, host) {
     return new Game({
       code, hostId: host.id, phase: 'lobby', round: 0,
-      settings: { bullets: 'auto', timer: 30, devil: false, bets: true, twists: true },
+      settings: { mode: 'party', bullets: 'auto', timer: 30, devil: false, bets: true, twists: true },
       players: [Game.newPlayer(host)],
       table: null, turn: null, forced: false, lastPlay: null, pile: 0, deadline: 0,
       reveal: null, gun: null, starter: null, winner: null, deaths: [], log: [], bulletsEach: 1,
       startCount: 0, seq: 0, mix: null, twist: null, dir: 1,
     });
   }
-  static newPlayer({ id, name, emoji, bot }) {
-    return { id, name: String(name || 'Player').slice(0, 16), emoji: emoji || '🙂', bot: !!bot, alive: true, hand: [], pulls: 0, bullets: 1, honest: 0, caught: 0, reads: 0, bets: 0, idle: 0 };
+  static newPlayer({ id, name, emoji, bot, outfit, gun }) {
+    return { id, name: String(name || 'Player').slice(0, 16), emoji: emoji || '🙂', bot: !!bot, ...Game.look(outfit, gun), alive: true, hand: [], pulls: 0, bullets: 1, honest: 0, caught: 0, reads: 0, bets: 0, idle: 0 };
   }
+
+  static look(outfit, gun) {
+    const o = Number.isInteger(outfit) && outfit >= 0 && outfit < OUTFIT_COUNT ? outfit : null;
+    return { outfit: o, gun: GUN_KINDS.includes(gun) ? gun : 'classic' };
+  }
+  // which house rules are live: Classic switches every extra off
+  mode() { return MODES.includes(this.s.settings.mode) ? this.s.settings.mode : 'party'; }
+  extras() { return this.mode() !== 'classic'; }
 
   p(id) { return this.s.players.find((x) => x.id === id); }
   alive() { return this.s.players.filter((x) => x.alive); }
@@ -126,7 +137,12 @@ export class Game {
   addPlayer(info) {
     const s = this.s;
     const ex = this.p(info.id);
-    if (ex) { if (info.name) ex.name = String(info.name).slice(0, 16); if (info.emoji) ex.emoji = info.emoji; return { ok: true, rejoin: true }; }
+    if (ex) {
+      if (info.name) ex.name = String(info.name).slice(0, 16);
+      if (info.emoji) ex.emoji = info.emoji;
+      if ('outfit' in info || 'gun' in info) Object.assign(ex, Game.look(info.outfit, info.gun));
+      return { ok: true, rejoin: true };
+    }
     if (s.phase !== 'lobby') return { ok: false, error: 'This game has already started.' };
     if (s.players.length >= MAX_PLAYERS) return { ok: false, error: 'The table is full (10 players).' };
     s.players.push(Game.newPlayer(info));
@@ -149,6 +165,7 @@ export class Game {
         if ('devil' in p) s.settings.devil = !!p.devil;
         if ('bets' in p) s.settings.bets = !!p.bets;
         if ('twists' in p) s.settings.twists = !!p.twists;
+        if ('mode' in p && MODES.includes(p.mode)) s.settings.mode = p.mode;
         if ('shape' in p && ['round', 'long'].includes(p.shape)) s.settings.shape = p.shape;
         return { ok: true };
       }
@@ -162,6 +179,10 @@ export class Game {
         }
         s.settings.seats = seats;
         this.orderBySeats();
+        return { ok: true };
+      }
+      case 'look': {
+        Object.assign(me, Game.look(a.outfit, a.gun));
         return { ok: true };
       }
       case 'idle': {
@@ -246,13 +267,14 @@ export class Game {
     s.table = RANKS[rnd(3)];
     // round twist (not on the very first round, so everyone learns the basics first)
     s.twist = null;
-    if (s.settings.twists && s.round > 1 && rnd(1000) < TWIST_CHANCE * 1000) {
+    if (this.extras() && s.settings.twists && s.round > 1 && rnd(1000) < TWIST_CHANCE * 1000) {
       const pool = Object.keys(TWISTS).filter((t) => t !== 'open' || alive.length > 2);
       s.twist = pool[rnd(pool.length)];
     }
     s.dir = s.twist === 'reverse' ? -1 : 1;
-    s.mix = deckMix(alive.length, s.settings.devil, s.twist === 'nojoker');
-    const deck = buildDeck(alive.length, s.settings.devil, s.twist === 'nojoker');
+    const devil = this.extras() && s.settings.devil;
+    s.mix = deckMix(alive.length, devil, s.twist === 'nojoker');
+    const deck = buildDeck(alive.length, devil, s.twist === 'nojoker');
     for (const p of s.players) p.hand = [];
     alive.forEach((p, i) => { p.hand = deck.slice(i * HAND, i * HAND + HAND); });
     s.phase = 'play';
@@ -292,7 +314,7 @@ export class Game {
 
   bettors() {
     const r = this.s.reveal;
-    if (!r || !this.s.settings.bets) return [];
+    if (!r || !this.s.settings.bets || !this.extras()) return [];
     return this.s.players.filter((q) => q.id !== r.caller && q.id !== r.target);
   }
 
@@ -300,12 +322,12 @@ export class Game {
     const s = this.s;
     const me = this.p(pid);
     if (s.phase !== 'play' || !me || !me.alive || !s.lastPlay || s.lastPlay.by === pid) return false;
-    return s.turn === pid || s.twist === 'open';
+    return s.turn === pid || (s.twist === 'open' && this.extras()) || this.mode() === 'chaos';
   }
 
   callLiar(pid, now) {
     const s = this.s;
-    if (s.phase !== 'play' || (s.turn !== pid && s.twist !== 'open')) return { ok: false, error: 'Not your turn.' };
+    if (s.phase !== 'play' || (s.turn !== pid && !this.canCall(pid))) return { ok: false, error: 'Not your turn.' };
     if (!this.p(pid)?.alive) return { ok: false };
     const lp = s.lastPlay;
     if (!lp || lp.by === pid) return { ok: false, error: 'Nothing to call yet.' };
@@ -389,7 +411,8 @@ export class Game {
         else shooters = [r.lie ? r.target : r.caller];
         r.shooters = shooters;
         const t = this.p(r.target);
-        if (r.lie) {
+        if (!this.extras()) { /* Classic: bullets never move */ }
+        else if (r.lie) {
           t.caught++;
           if (t.caught >= STREAK) {
             t.caught = 0;
@@ -469,13 +492,13 @@ export class Game {
         caller: r.caller, target: r.target, n: r.n, stage: r.stage, left: Math.max(0, r.until - Date.now()),
         cards: showCards ? r.cards : null, lie: showCards ? r.lie : null, devil: showCards ? r.devil : null,
         shooters: r.shooters || null, myBet: r.bets[pid] || null, betCount: Object.keys(r.bets).length,
-        canBet: !!s.settings.bets && pid !== r.caller && pid !== r.target,
+        canBet: !!s.settings.bets && this.extras() && pid !== r.caller && pid !== r.target,
       } : null,
       gun: s.gun ? { shooters: s.gun.shooters, done: s.gun.done, devil: s.gun.devil, left: Math.max(0, s.gun.until - Date.now()) } : null,
       winner: s.winner, deaths: s.deaths,
       players: s.players.map((q) => ({
         id: q.id, name: q.name, emoji: q.emoji, bot: q.bot, alive: q.alive, count: q.hand.length,
-        pulls: q.pulls, reads: q.reads, bets: q.bets, bullets: q.bullets, honest: q.honest, caught: q.caught, goodReads: q.goodReads || 0, idle: q.idle || 0,
+        pulls: q.pulls, reads: q.reads, bets: q.bets, outfit: q.outfit, gun: q.gun, bullets: q.bullets, honest: q.honest, caught: q.caught, goodReads: q.goodReads || 0, idle: q.idle || 0,
       })),
       me: {
         hand: me.hand,
