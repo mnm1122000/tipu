@@ -1,10 +1,10 @@
 // TIPU! — app: screens, host loop, client flow, table animations, the reveal and the gun.
-import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK } from './engine.js?v=1';
-import { openIdle } from './idle.js?v=1';
-import { Actor } from './actor.js?v=1';
-import * as net from './net.js?v=1';
-import { sfx, vibrate } from './sfx.js?v=1';
-import { Revolver } from './gun.js?v=1';
+import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK } from './engine.js?v=2';
+import { openIdle } from './idle.js?v=2';
+import { Actor } from './actor.js?v=2';
+import * as net from './net.js?v=2';
+import { sfx, vibrate } from './sfx.js?v=2';
+import { Revolver } from './gun.js?v=2';
 
 // ======================================================================
 // utils

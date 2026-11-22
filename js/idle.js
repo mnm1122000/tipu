@@ -1,7 +1,7 @@
 // TIPU! — the back room. A little shooting gallery for ghosts while the living keep lying.
 // Bottles pop up on three shelves. Tap to shoot. 6 shots, then swipe down to reload.
 // 🍾 = 1 point, golden bottle = 3, skull bottle = −3 (don't shoot it). 30 seconds a round.
-import { sfx, vibrate } from './sfx.js?v=1';
+import { sfx, vibrate } from './sfx.js?v=2';
 
 const ROUND_MS = 30000;
 const SLOTS = 5;   // per shelf

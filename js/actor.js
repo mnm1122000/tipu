@@ -1,7 +1,7 @@
 // TIPU! — what everyone else sees while someone takes the gun: the shooter as a character in a
 // spotlight, their profile picture for a face, revolver raised to the temple. It follows the
 // shooter's real phone live (loading, gun up, finger tightening on the trigger), then BANG or *click*.
-import { sfx, vibrate } from './sfx.js?v=1';
+import { sfx, vibrate } from './sfx.js?v=2';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
