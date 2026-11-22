@@ -22,7 +22,7 @@ A bluffing card game for 2–10 players in the same room. Each player uses their
    - optional: **drag the hammer back** to cock it (lighter trigger)
    - **press the trigger and pull it down** until it breaks → **BANG** (muzzle flash, recoil, smoke, cracked screen, red out) or ***click*** (heartbeat, relief)
 
-   The gun only appears on the shooter's phone. Everyone else watches the shooter as a **character in a spotlight with their profile picture as the face**, raising the revolver to the temple, sweating and shaking harder as the real trigger tightens, then **BANG** (flash, splatter, the body slumps, a ghost rises) or ***click*** (relief).
+   The gun only appears on the shooter's phone. Everyone else watches the shooter as a **character in a spotlight with their profile picture as the face**, dressed in one of **10 outfits** (one per seat: The Boss, Lady in Red, The Cowboy, Hijabi, The Biker, Bartender, The Diva, Hoodie, Baju Melayu, The CEO), holding the same revolver, raising the revolver to the temple, sweating and shaking harder as the real trigger tightens, then **BANG** (flash, splatter, the body slumps, a ghost rises) or ***click*** (relief).
 
    **Odds:** every pull is a fresh spin, so the chance is simply **your bullets in 6**, every time (2 bullets = 2/6). Moving bullets and spinning are for show only.
 8. **Bullets move.** Called a liar while telling the truth **3 times** → **−1 bullet** (never below 1). Caught lying **3 times** → **+1 bullet** (up to 5).
@@ -56,6 +56,6 @@ node tools/serve.cjs 5192     # http://localhost:5192  (add ?dev=1 for "Add bot"
 node tools/test-engine.js     # rule tests + 540 random full games (2–10 players)
 ```
 
-**Test bench:** `tools/bench.html`. You're the host on the big phone. Pick 1–9 players and they join by themselves when your table opens, play their own turns, bet, and pull their own triggers (both switchable so you can drive their phones yourself). `tools/icons.html` renders the PNG icons from `assets/img/logo.svg`.
+**Test bench:** `tools/bench.html`. You're the host on the big phone. Pick 1–9 players and they join by themselves when your table opens, play their own turns, bet, and pull their own triggers (both switchable so you can drive their phones yourself). `tools/outfits.html` shows all 10 outfits side by side. `tools/icons.html` renders the PNG icons from `assets/img/logo.svg`.
 
 TIPU! is an original game in the bluffing-card family (Cheat / I Doubt It) with a revolver twist. It isn't affiliated with any commercial game.

@@ -5,7 +5,7 @@
 //   4. press the trigger and pull it back until it breaks
 //   5. BANG or *click*
 // Everyone else sees a live mirror of the same gun (spin, hammer and trigger streamed ~10×/s).
-import { sfx, vibrate } from './sfx.js?v=2';
+import { sfx, vibrate } from './sfx.js?v=3';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -16,14 +16,15 @@ const FLUTE_PITCH = 49;           // side-view flute spacing (one chamber)
 const PULL_DA = 120, PULL_SA = 46; // trigger travel in gun units: double action vs cocked
 
 // ---------------------------------------------------------------- artwork
-function sideGunSVG() {
+// the revolver, side view. `sfx` keeps its gradient ids unique when drawn more than once on a page
+export function sideGunSVG(sfx = '') {
   const flutes = [];
   for (let i = -4; i <= 8; i++) flutes.push(`<rect x="342" y="${100 + i * FLUTE_PITCH}" width="104" height="22" rx="11" fill="url(#gFlute)"/>`);
   const checks = [];
   for (let i = -12; i < 22; i++) checks.push(`<path d="M${150 + i * 14} 200 l140 340" /><path d="M${150 + i * 14} 540 l140 -340" />`);
   const spur = [];
   for (let i = 0; i < 6; i++) spur.push(`<path d="M${236 + i * 6} ${86 + i * 3} l-6 10" />`);
-  return `<svg class="g-side" viewBox="0 0 ${VB_W} ${VB_H}" xmlns="http://www.w3.org/2000/svg">
+  const svg = `<svg class="g-side" viewBox="0 0 ${VB_W} ${VB_H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="gSteel" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#6f7c8f"/><stop offset=".18" stop-color="#2c3440"/><stop offset=".55" stop-color="#11161d"/><stop offset=".8" stop-color="#2a323d"/><stop offset="1" stop-color="#0a0d12"/>
@@ -100,6 +101,7 @@ function sideGunSVG() {
     <circle r="40" fill="#fff"/>
   </g>
 </svg>`;
+  return sfx ? svg.replace(/(id="|url\(#)(g[A-Z]\w*)/g, `$1$2${sfx}`) : svg;
 }
 
 function rearCylSVG() {

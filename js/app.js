@@ -1,10 +1,10 @@
 // TIPU! — app: screens, host loop, client flow, table animations, the reveal and the gun.
-import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK } from './engine.js?v=2';
-import { openIdle } from './idle.js?v=2';
-import { Actor } from './actor.js?v=2';
-import * as net from './net.js?v=2';
-import { sfx, vibrate } from './sfx.js?v=2';
-import { Revolver } from './gun.js?v=2';
+import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK } from './engine.js?v=3';
+import { openIdle } from './idle.js?v=3';
+import { Actor } from './actor.js?v=3';
+import * as net from './net.js?v=3';
+import { sfx, vibrate } from './sfx.js?v=3';
+import { Revolver } from './gun.js?v=3';
 
 // ======================================================================
 // utils
@@ -682,6 +682,7 @@ function openGun(pid, watch, v) {
   // the gun itself only appears on the shooter's phone; everyone else watches the shooter as a character
   const r = watch ? new Actor({
     name: p.name, photo: App.avatars[pid] || null, emoji: p.emoji, pulls: p.pulls, bullets: p.bullets || 1,
+    outfit: Math.max(0, v.players.findIndex((q) => q.id === pid)),
     extra: multi ? `😈 ${v.gun.shooters.length} guns out: ${v.gun.shooters.map((id) => esc(nameOf(id))).join(', ')}` : '',
     onResult: () => { if (App.gun) App.gun.resultAt = Date.now(); },
   }) : new Revolver({

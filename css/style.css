@@ -464,3 +464,4 @@ input { font: inherit; -webkit-user-select: text; user-select: text; }
 @keyframes ghostRise { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.6); } 30% { opacity: .95; } 100% { opacity: .85; transform: translate(-50%, -90px) scale(1.15); } }
 #gun.actor .g-hint { bottom: calc(var(--safe-b) + 24px); }
 #gun.actor .g-result { bottom: 8%; }
+#gun.actor .g-cylside { opacity: 1 !important; }
