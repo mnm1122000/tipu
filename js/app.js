@@ -1,11 +1,12 @@
 // TIPU! — app: screens, host loop, client flow, table animations, the reveal and the gun.
-import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK, handSize, hiddenSize } from './engine.js?v=5';
-import { openIdle } from './idle.js?v=5';
-import { Actor, OUTFITS, characterSVG } from './actor.js?v=5';
-import { GUNS, sideGunSVG } from './gun.js?v=5';
-import * as net from './net.js?v=5';
-import { sfx, vibrate } from './sfx.js?v=5';
-import { Revolver } from './gun.js?v=5';
+import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK, handSize, hiddenSize } from './engine.js?v=6';
+import { openIdle } from './idle.js?v=6';
+import { openCrop } from './crop.js?v=6';
+import { Actor, OUTFITS, characterSVG } from './actor.js?v=6';
+import { GUNS, sideGunSVG } from './gun.js?v=6';
+import * as net from './net.js?v=6';
+import { sfx, vibrate } from './sfx.js?v=6';
+import { Revolver } from './gun.js?v=6';
 
 // ======================================================================
 // utils
@@ -72,17 +73,18 @@ function avHTML(id, emoji, cls = 'av') {
   return img ? `<div class="${cls} photo" data-av="${esc(id)}" style="background-image:url('${img}')"></div>`
     : `<div class="${cls}" data-av="${esc(id)}">${esc(emoji || '🙂')}</div>`;
 }
-function fileToPhoto(file) {
+// shrinks the picked picture to at most 720 px so it can be kept for re-cropping later
+function fileToSource(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      const s = Math.min(img.width, img.height);
+      const k = Math.min(1, 720 / Math.max(img.width, img.height));
       const c = document.createElement('canvas');
-      c.width = c.height = 160;
-      c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 160, 160);
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url);
-      resolve(c.toDataURL('image/jpeg', 0.72));
+      resolve(c.toDataURL('image/jpeg', 0.82));
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that picture.')); };
     img.src = url;
@@ -98,14 +100,19 @@ function onAvatar(data, id) {
   else return;
   if (App.screen === 'game') render();
 }
+async function cropPhoto(src, prev) {
+  const r = await openCrop(src, prev);
+  if (!r) return;
+  App.profile.photo = r.photo;
+  store.set('profile', App.profile);
+  store.set('photoSrc', { src, crop: r.crop });
+  publishPhoto();
+  if (App.modalKind === 'wardrobe') wardrobeSheet(true);
+  render();
+}
 async function onPicked(file) {
   if (!file) return;
-  try {
-    App.profile.photo = await fileToPhoto(file);
-    store.set('profile', App.profile);
-    publishPhoto();
-    render();
-  } catch (e) { toast(e.message); }
+  try { await cropPhoto(await fileToSource(file), null); } catch (e) { toast(e.message); }
 }
 $('#filePick').addEventListener('change', (e) => { onPicked(e.target.files[0]); e.target.value = ''; });
 $('#camPick').addEventListener('change', (e) => { onPicked(e.target.files[0]); e.target.value = ''; });
@@ -783,7 +790,7 @@ function rHome() {
       <h3>You</h3>
       <div class="me-row">
         <div class="me-av ${pr.photo ? 'photo' : ''}" data-act="pickGallery" style="${pr.photo ? `background-image:url('${pr.photo}')` : ''}">${pr.photo ? '' : esc(pr.emoji)}</div>
-        <div class="me-btns"><button class="btn sm" data-act="pickCamera">📸 Take photo</button><button class="btn sm" data-act="pickGallery">🖼️ Gallery</button>${pr.photo ? '<button class="btn sm ghost" data-act="clearPhoto">✕ Use emoji</button>' : ''}</div>
+        <div class="me-btns"><button class="btn sm" data-act="pickCamera">📸 Take photo</button><button class="btn sm" data-act="pickGallery">🖼️ Gallery</button>${pr.photo && store.get('photoSrc') ? '<button class="btn sm" data-act="adjustPhoto">✂️ Adjust</button>' : ''}${pr.photo ? '<button class="btn sm ghost" data-act="clearPhoto">✕ Use emoji</button>' : ''}</div>
       </div>
       <input id="nameIn" class="field" maxlength="16" placeholder="Your name" value="${esc(pr.name)}" autocomplete="off">
       <div class="wr-home" data-act="wardrobe"><div class="wr-mini">${characterSVG({ ...myLook(), photo: pr.photo, emoji: pr.emoji }, 'home', { pose: 'up' })}</div>
@@ -1193,7 +1200,7 @@ function wardrobeSheet(keepScroll = false) {
   const sc = keepScroll && grid ? grid.scrollLeft : 0;
   openModal(`<div class="title">👔 Wardrobe</div>
     <div class="wr-top"><div class="wr-big">${characterSVG({ ...myLook(), photo: pr.photo, emoji: pr.emoji }, 'wbig', { pose: 'up' })}</div>
-      <div class="wr-info"><b>${esc(OUTFITS[pr.outfit].name)}</b><div class="small">${OUTFITS[pr.outfit].g === 'f' ? 'Women' : 'Men'}'s outfit · your photo is the face</div>
+      <div class="wr-info"><b>${esc(OUTFITS[pr.outfit].name)}</b><div class="small">${OUTFITS[pr.outfit].g === 'f' ? 'Women' : 'Men'}'s outfit · your photo is the face${pr.photo && store.get('photoSrc') ? ' · <a data-act="adjustPhoto">✂️ adjust</a>' : ''}</div>
       <div class="wr-gunname">🔫 ${esc(GUNS[pr.gun].name)}<div class="small">${esc(GUNS[pr.gun].desc)}</div></div></div></div>
     <h4 class="wr-h">Outfit</h4>
     <div class="wr-grid">${OUTFITS.map((o, i) => `<button class="wr-o ${i === pr.outfit ? 'on' : ''}" data-act="wrOutfit" data-v="${i}">${characterSVG({ outfit: i, gun: pr.gun, emoji: '🙂' }, 'wo' + i, { pose: 'down' })}<span>${esc(o.name)}</span></button>`).join('')}</div>
@@ -1231,6 +1238,7 @@ document.addEventListener('click', async (e) => {
     case 'emoji': readProfile(); App.profile.emoji = t.dataset.e; App.profile.photo = null; store.set('profile', App.profile); publishPhoto(); render(); break;
     case 'pickCamera': readProfile(); $('#camPick').click(); break;
     case 'pickGallery': readProfile(); $('#filePick').click(); break;
+    case 'adjustPhoto': { readProfile(); const ps = store.get('photoSrc'); if (ps) cropPhoto(ps.src, ps.crop); break; }
     case 'clearPhoto': readProfile(); App.profile.photo = null; store.set('profile', App.profile); publishPhoto(); render(); break;
     case 'hostInstead': readProfile(); setScreen('home', {}); break;
     case 'doCreate':

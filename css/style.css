@@ -499,3 +499,18 @@ input { font: inherit; -webkit-user-select: text; user-select: text; }
 .stock .card { --cw: 30px; position: absolute; left: 4px; top: 0; transform: rotate(-8deg); }
 .stock .card + .card { left: 9px; top: 3px; transform: rotate(4deg); }
 .stock span { position: absolute; left: 0; right: 0; top: 50px; text-align: center; font-size: 9px; font-weight: 800; color: var(--mut); line-height: 1.1; }
+
+/* photo cropper */
+#crop { position: fixed; inset: 0; z-index: 9000; background: #0d0708f2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; animation: fadeIn .2s; touch-action: none; }
+#crop.out { opacity: 0; transition: opacity .2s; }
+.cr-title { font-family: Bungee, Impact, sans-serif; color: var(--gold2); font-size: 18px; text-align: center; }
+.cr-stage { position: relative; width: min(78vw, 46vh, 340px); aspect-ratio: 1; overflow: hidden; border-radius: 16px; background: #2a1a1c; cursor: grab; touch-action: none; }
+.cr-stage:active { cursor: grabbing; }
+.cr-stage img { position: absolute; left: 0; top: 0; max-width: none; user-select: none; pointer-events: none; transform-origin: 0 0; }
+.cr-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px #0d0708b8; border: 3px solid var(--gold); pointer-events: none; }
+.cr-zoom { display: flex; align-items: center; gap: 10px; width: min(78vw, 340px); color: var(--gold2); font-size: 22px; }
+.cr-zoom input { flex: 1; accent-color: var(--gold); }
+.cr-hint { color: #fff9; font-size: 13px; }
+.cr-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.wr-info a[data-act] { color: var(--gold2); text-decoration: underline; cursor: pointer; }
+@keyframes fadeIn { from { opacity: 0; } }

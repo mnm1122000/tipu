@@ -19,7 +19,7 @@ On the home screen (and in the lobby) everyone opens the **👔 Wardrobe** and p
 - one of **15 outfits** in a 1920s noir cartoon style (10 men's, 5 women's: Pinstripe Boss, Suspenders, Waistcoat, Trench Coat, Brown Suit, Fur Coat Don, Green Overcoat, The Dandy, The Driver, Baju Melayu, The Flapper, Lady in Red, Blue Pantsuit, Noir Hijab, Emerald Diva)
 - one of **5 revolvers**: Classic (blued, walnut), Nickel (chrome, black grip), Gold (ivory grip), Snub (short barrel), Pearl (black, mother-of-pearl).
 
-Your profile photo becomes the character's whole head.
+Your profile photo becomes the character's whole head. After picking or taking a photo you can drag it and zoom (pinch or slider) to fit your face in the circle, and *✂️ Adjust* reopens it later.
 
 ## How a round runs
 
