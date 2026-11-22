@@ -42,9 +42,27 @@ Your profile photo becomes the character's whole head.
 8. **Bullets move.** Called a liar while telling the truth **3 times** → **−1 bullet** (never below 1). Caught lying **3 times** → **+1 bullet** (up to 5).
 9. A new round starts with fresh cards. **Last player alive wins.**
 
+## Hidden cards (so nobody can count your hand)
+
+Not every card is dealt. Some always stay face down in the stock for the whole round, so with 2 players you can't work out your opponent's hand by counting.
+
+| Players | Each gets | Dealt | Stay hidden | Deck |
+|---|---|---|---|---|
+| 2 | 4 | 8 | 8 | 16 |
+| 3 | 4 | 12 | 8 | 20 |
+| 4 | 5 | 20 | 5 | 25 |
+| 5 | 5 | 25 | 7 | 32 |
+| 6 | 5 | 30 | 8 | 38 |
+| 7 | 5 | 35 | 9 | 44 |
+| 8 | 5 | 40 | 10 | 50 |
+| 9 | 5 | 45 | 12 | 57 |
+| 10 | 5 | 50 | 13 | 63 |
+
+The deck keeps the same mix at every size (about 30% each of Kings, Queens and Aces, 10% Jokers). The round intro, the bar at the top and a face-down stack on the table all show how many stay hidden.
+
 ## Made for 10 players
 
-- **The deck grows with the table:** 5 cards per living player, about 30% each rank and 10% Jokers (10 players = 15 Kings, 15 Queens, 15 Aces, 5 Jokers).
+- **The deck grows with the table** (see the hidden-cards table above): 10 players = 63 cards, 5 each, 13 never dealt.
 - **2 bullets on big tables:** *Bullets per gun* on *Auto* gives everyone 2 bullets when 7+ players start. You can force 1 or 2.
 - **🌀 Round twists** (from round 2, about 4 rounds in 10): **↺ Counter-clockwise** (turns go the other way), **📢 Anyone can call** (anyone at the table can shout TIPU! on the last play), **🚫 No Jokers**.
 - **Ghost bets:** everyone outside the call, alive or dead, bets on every TIPU!.

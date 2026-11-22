@@ -2,8 +2,8 @@
 // 1920s-style character under a spotlight. Their whole head is their profile picture. They wear the
 // outfit they picked in the wardrobe and hold the revolver they picked. The arm follows the shooter's
 // real phone live (gun comes up, finger tightens on the trigger), then BANG or *click*.
-import { sfx, vibrate } from './sfx.js?v=4';
-import { sideGunSVG, muzzleX, GUNS } from './gun.js?v=4';
+import { sfx, vibrate } from './sfx.js?v=5';
+import { sideGunSVG, muzzleX, GUNS } from './gun.js?v=5';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

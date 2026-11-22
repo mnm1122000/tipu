@@ -1,18 +1,20 @@
 // node tools/test-engine.js — rule checks + many random full games with 2–10 players
-import { Game, deckMix, buildDeck, isTrue, oddsNext, bulletsFor, HAND, MAX_PLAYERS } from '../js/engine.js';
+import { Game, deckMix, buildDeck, isTrue, oddsNext, bulletsFor, HAND, MAX_PLAYERS, deckSize, handSize, hiddenSize } from '../js/engine.js';
 
 let fails = 0;
 const ok = (c, msg) => { if (!c) { fails++; console.error('✗ ' + msg); } };
 
 // deck mix
+console.log('players → each / dealt / hidden / deck: ' + [2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `${n}:${handSize(n)}/${handSize(n) * n}/${hiddenSize(n)}/${deckSize(n)}`).join('  '));
 for (let n = 2; n <= 10; n++) {
   const m = deckMix(n);
   const total = m.K + m.Q + m.A + m.J + m.D;
-  ok(total === HAND * n, `deck size for ${n} = ${total}`);
+  ok(total === deckSize(n), `deck size for ${n} = ${total}`);
+  ok(hiddenSize(n) >= 4 && hiddenSize(n) / deckSize(n) >= 0.19, `enough hidden cards for ${n}`);
   ok(Math.max(m.K, m.Q, m.A) - Math.min(m.K, m.Q, m.A) <= 1, `ranks even for ${n}`);
   const md = deckMix(n, true);
-  ok(md.D === 1 && md.K + md.Q + md.A + md.J + md.D === HAND * n, `devil deck for ${n}`);
-  ok(buildDeck(n).length === HAND * n, `buildDeck ${n}`);
+  ok(md.D === 1 && md.K + md.Q + md.A + md.J + md.D === deckSize(n), `devil deck for ${n}`);
+  ok(buildDeck(n).length === deckSize(n), `buildDeck ${n}`);
 }
 ok(isTrue({ r: 'J' }, 'K') && isTrue({ r: 'K' }, 'K') && !isTrue({ r: 'Q' }, 'K') && isTrue({ r: 'D' }, 'A'), 'isTrue');
 ok(oddsNext(1) === 1 / 6 && oddsNext(2) === 2 / 6, 'odds');
@@ -184,7 +186,7 @@ ok(bulletsFor({ bullets: 'auto' }, 7) === 2 && bulletsFor({ bullets: 'auto' }, 6
   ok(g.canCall('c') && !g.canCall('a'), 'open: anyone but the player can call');
   ok(g.handle('c', { type: 'liar' }, 0).ok && s.reveal.caller === 'c', 'open: c calls out of turn');
   const m = deckMix(6, false, true);
-  ok(m.J === 0 && m.K + m.Q + m.A === 30, 'no-joker deck');
+  ok(m.J === 0 && m.K + m.Q + m.A === deckSize(6), 'no-joker deck');
 }
 
 // random full games
@@ -226,7 +228,7 @@ for (let n = 2; n <= MAX_PLAYERS; n++) {
         g.tick(t);
       }
       const total = s.players.reduce((a, q) => a + q.hand.length, 0) + s.pile;
-      if (s.phase === 'play') ok(total === HAND * g.alive().length, `cards conserved ${total}`);
+      if (s.phase === 'play') ok(total + s.hidden === deckSize(g.alive().length) && total === handSize(g.alive().length) * g.alive().length, `cards conserved ${total}`);
       for (const q of s.players) ok(q.bullets >= 1 && q.bullets <= 5, 'bullets in range');
     }
     ok(s.phase === 'over' && s.winner && g.alive().length === 1, `game ends (n=${n})`);

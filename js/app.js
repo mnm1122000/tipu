@@ -1,11 +1,11 @@
 // TIPU! — app: screens, host loop, client flow, table animations, the reveal and the gun.
-import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK } from './engine.js?v=4';
-import { openIdle } from './idle.js?v=4';
-import { Actor, OUTFITS, characterSVG } from './actor.js?v=4';
-import { GUNS, sideGunSVG } from './gun.js?v=4';
-import * as net from './net.js?v=4';
-import { sfx, vibrate } from './sfx.js?v=4';
-import { Revolver } from './gun.js?v=4';
+import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK, handSize, hiddenSize } from './engine.js?v=5';
+import { openIdle } from './idle.js?v=5';
+import { Actor, OUTFITS, characterSVG } from './actor.js?v=5';
+import { GUNS, sideGunSVG } from './gun.js?v=5';
+import * as net from './net.js?v=5';
+import { sfx, vibrate } from './sfx.js?v=5';
+import { Revolver } from './gun.js?v=5';
 
 // ======================================================================
 // utils
@@ -617,6 +617,7 @@ function showIntro(e, v) {
   clearTimeout(App.introTimer);
   const cols = [['K', 'Kings'], ['Q', 'Queens'], ['A', 'Aces'], ['J', 'Jokers'], ['D', 'Devil']].filter(([r]) => mix[r] > 0);
   const total = cols.reduce((t, [r]) => t + mix[r], 0);
+  const nAlive = (e.to && e.to.length) || (v ? v.players.filter((p) => p.alive).length : 2);
   const tw = e.twist ? TWISTS[e.twist] : null;
   const el = document.createElement('div');
   el.id = 'intro';
@@ -626,7 +627,7 @@ function showIntro(e, v) {
     <div class="in-deck">${cols.map(([r, label], i) => `<div class="in-col ${r === e.table ? 'tb' : ''}" style="--i:${i}">
       <div class="in-stack">${[0, 1, 2].map((k) => cardHTML({ id: 0, r }).replace('class="card', `style="--k:${k}" class="card`)).join('')}</div>
       <div class="in-n" data-n="${mix[r]}">0</div><div class="in-l">${label}</div></div>`).join('')}</div>
-    <div class="in-total">${total} cards · ${HAND} each · ${RANK_PLURAL[e.table]}${mix.J ? ', Jokers' : ''}${mix.D ? ', the Devil' : ''} count as true</div>
+    <div class="in-total">${total} cards in the deck · <b>${handSize(nAlive)} each</b> · <b class="in-hid">🂠 ${hiddenSize(nAlive)} stay hidden</b><br>${RANK_PLURAL[e.table]}${mix.J ? ', Jokers' : ''}${mix.D ? ', the Devil' : ''} count as true</div>
     ${tw ? `<div class="in-twist"><b>${tw.icon} TWIST: ${esc(tw.name)}</b><span>${esc(tw.text)}</span></div>` : ''}
     <div class="in-tap">tap to close · tap the bar at the top to see this again</div></div>`;
   document.body.appendChild(el);
@@ -872,7 +873,7 @@ function rLobby(v) {
       <div class="small setnote">From round 2, some rounds get a twist: ↺ turns go counter-clockwise, 📢 anyone can call TIPU!, or 🚫 no Jokers.</div>
       <div class="setrow"><span class="k">👻 Bets on calls</span><div class="chips">${chip('bets', 0, 'Off', !s.bets)}${chip('bets', 1, 'On', s.bets)}</div></div>
       <div class="small setnote">Everyone not in the call bets LIE, TRUTH or PASS before the reveal. Alive: wrong = +1 bullet, 2 right = −1 bullet. Ghosts bet for glory.</div>`}
-      <div class="deckline">Deck for ${Math.max(2, n)}: <b>${mix.K}</b> Kings · <b>${mix.Q}</b> Queens · <b>${mix.A}</b> Aces · <b>${mix.J}</b> Jokers${mix.D ? ' · <b>1</b> Devil' : ''} · ${HAND} each</div>
+      <div class="deckline">Deck for ${Math.max(2, n)}: <b>${mix.K}</b> Kings · <b>${mix.Q}</b> Queens · <b>${mix.A}</b> Aces · <b>${mix.J}</b> Jokers${mix.D ? ' · <b>1</b> Devil' : ''}<br>${handSize(Math.max(2, n))} cards each · <b>${hiddenSize(Math.max(2, n))} stay hidden</b> so nobody can count the other hands</div>
     </div>
   </div>
   <div class="sticky-bottom">${host
@@ -941,7 +942,7 @@ function infoBarHTML(v) {
     .map(([r, n]) => `<span class="ib-c r-${r} ${r === v.table ? 'tb' : ''}"><b>${r === 'J' ? '★' : r === 'D' ? '☠' : r}</b>${n}</span>`).join('');
   const tw = v.twist ? `<span class="ib-tw">${TWISTS[v.twist].icon} ${esc(TWISTS[v.twist].name)}</span>` : '';
   const gun = me && me.alive ? `<span class="ib-gun" title="your gun">🔫${me.bullets}/6 · 😇${me.honest}/${STREAK} · 🤥${me.caught}/${STREAK}</span>` : '';
-  return `<div class="infobar" data-act="intro">${parts}<span class="ib-dir">${v.dir === -1 ? '↺' : '↻'}</span>${tw}${gun}</div>`;
+  return `<div class="infobar" data-act="intro">${parts}${v.hidden ? `<span class="ib-hid" title="never dealt this round">🂠${v.hidden} hidden</span>` : ''}<span class="ib-dir">${v.dir === -1 ? '↺' : '↻'}</span>${tw}${gun}</div>`;
 }
 function dirRingSVG(v) {
   return `<svg class="dirring ${v.dir === -1 ? 'ccw' : ''}" viewBox="0 0 100 100" preserveAspectRatio="none"><defs><marker id="dah" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="rgba(255,216,119,.8)"/></marker></defs>
@@ -1023,6 +1024,7 @@ function rTable(v) {
       ${seatsHTML(v)}
       <div class="center">
         ${tableCardHTML(v)}
+        ${v.hidden ? `<div class="stock" title="cards never dealt this round">${cardHTML(null, 'p')}${cardHTML(null, 'p')}<span>${v.hidden}<br>hidden</span></div>` : ''}
         <div id="pile" class="pile">${v.pile ? Array.from({ length: Math.min(v.pile, 9) }, (_, i) => cardHTML(null, 'p').replace('class="card', `style="--i:${i};--rr:${((i * 47) % 30) - 15}deg" class="card`)).join('') : '<div class="pile-empty"></div>'}<span class="cnt">${v.pile}</span></div>
       </div>
     </div>
@@ -1131,7 +1133,7 @@ function closeModal() {
 function rulesHTML() {
   return `<div class="title">How to play TIPU!</div><div class="rules">
     <h4>Modes</h4><ul><li><b>🎩 Classic</b>: only the next player can call TIPU!, nothing else changes. <b>🎉 Party</b>: twists, bets with stakes, moving bullets. <b>🔥 Chaos</b>: Party, and anyone can call TIPU! any time.</li></ul>
-    <h4>The table</h4><ul><li>2–10 players, one phone each. One phone hosts, the rest scan the QR code. The host drags everyone to where they really sit, and turns go clockwise from those seats.</li><li>Every round everyone gets <b>5 cards</b>. The deck is Kings, Queens, Aces and a few <b>Jokers</b> (wild), and grows with the table. At the start of each round the phone shows exactly how many of each are in the deck. Tap the bar at the top to see it again.</li><li>Each round the phone picks a <b>table card</b>: King, Queen or Ace.</li></ul>
+    <h4>The table</h4><ul><li>2–10 players, one phone each. One phone hosts, the rest scan the QR code. The host drags everyone to where they really sit, and turns go clockwise from those seats.</li><li>Every round everyone gets <b>4 cards</b> (2–3 players) or <b>5 cards</b> (4+). Some cards are <b>never dealt</b>: they stay face down so nobody can count the other hands (8 hidden with 2–3 players, a quarter of the dealt cards with more). The deck is Kings, Queens, Aces and a few <b>Jokers</b> (wild), and grows with the table. At the start of each round the phone shows exactly how many of each are in the deck. Tap the bar at the top to see it again.</li><li>Each round the phone picks a <b>table card</b>: King, Queen or Ace.</li></ul>
     <h4>Your turn</h4><ul><li>Put down <b>1 to 3 cards face down</b>, claiming they are all the table card. Jokers count as the table card. You may lie.</li><li>Or, if someone played before you, shout <b>TIPU!</b> (liar).</li><li>Out of cards? You're skipped. If everyone else is empty, the next player <b>must</b> call TIPU!</li></ul>
     <h4>TIPU!</h4><ul><li>The cards are turned over. If <b>any</b> card isn't the table card or a Joker, the liar takes the gun. If they were all true, the <b>caller</b> takes the gun.</li><li>Before the reveal, everyone else bets <b>LIE</b>, <b>TRUTH</b> or <b>PASS</b>. If you're alive it's for real: a <b>wrong read loads +1 bullet</b>, every <b>2 right reads remove 1</b>, PASS is safe. Ghosts 👻 bet for glory. The sharpest reader gets an award at the end.</li></ul>
     <h4>The gun</h4><ul><li>You start with <b>1 bullet</b> (2 when 7+ players start, on Auto). Every pull is a fresh spin: <b>bullets in 6</b> chance, every time.</li><li>You see your bullets in the cylinder and can move them around, then load the gun. Swipe across the cylinder to spin it, drag the hammer back if you like, then press the trigger and pull.</li></ul>

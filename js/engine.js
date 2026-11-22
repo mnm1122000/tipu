@@ -15,7 +15,13 @@
 
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 10;
-export const HAND = 5;
+// Not every card is dealt: some always stay face down in the stock, so nobody can work out the
+// other hands by counting (with 2 players and everything dealt you'd know your opponent's hand).
+//   2–3 players: 4 cards each, 8 stay hidden · 4+ players: 5 each, a quarter of that stays hidden
+export const handSize = (n) => (n <= 3 ? 4 : 5);
+export const hiddenSize = (n) => (n <= 3 ? 8 : Math.ceil((handSize(n) * n) / 4));
+export const deckSize = (n) => handSize(n) * n + hiddenSize(n);
+export const HAND = 5; // most cards anyone holds
 export const CHAMBERS = 6;
 export const RANKS = ['K', 'Q', 'A'];
 export const RANK_NAME = { K: 'King', Q: 'Queen', A: 'Ace', J: 'Joker', D: 'Devil' };
@@ -53,7 +59,7 @@ export function shuffle(a) {
 
 // deck for n living players: 5n cards, ~10% jokers, the rest split evenly between K / Q / A
 export function deckMix(n, devil = false, noJoker = false) {
-  const total = HAND * n;
+  const total = deckSize(n);
   const jokers = noJoker ? 0 : Math.max(1, Math.round(total / 10)) - (devil ? 1 : 0);
   const rest = total - jokers - (devil ? 1 : 0);
   const base = Math.floor(rest / 3);
@@ -276,7 +282,9 @@ export class Game {
     s.mix = deckMix(alive.length, devil, s.twist === 'nojoker');
     const deck = buildDeck(alive.length, devil, s.twist === 'nojoker');
     for (const p of s.players) p.hand = [];
-    alive.forEach((p, i) => { p.hand = deck.slice(i * HAND, i * HAND + HAND); });
+    const h = handSize(alive.length);
+    alive.forEach((p, i) => { p.hand = deck.slice(i * h, i * h + h); });
+    s.hidden = deck.length - h * alive.length;   // these stay face down, unseen, all round
     s.phase = 'play';
     s.pile = 0; s.lastPlay = null; s.reveal = null; s.gun = null; s.forced = false;
     let st = this.p(s.starter);
@@ -484,6 +492,7 @@ export class Game {
     return {
       code: s.code, hostId: s.hostId, phase: s.phase, round: s.round, settings: s.settings,
       minPlayers: MIN_PLAYERS, maxPlayers: MAX_PLAYERS, bulletsEach: s.bulletsEach,
+      handSize: s.mix ? handSize(this.alive().length) : null, hidden: s.hidden || 0,
       table: s.table, turn: s.turn, forced: s.forced, pile: s.pile, mix: s.mix, twist: s.twist, dir: s.dir || 1,
       canCall: this.canCall(pid),
       deadline: s.deadline ? s.deadline - Date.now() : 0,
