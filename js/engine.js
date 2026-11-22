@@ -22,6 +22,7 @@ export const RANK_NAME = { K: 'King', Q: 'Queen', A: 'Ace', J: 'Joker', D: 'Devi
 export const RANK_PLURAL = { K: 'Kings', Q: 'Queens', A: 'Aces' };
 export const TIMERS = [0, 20, 30, 45];
 export const STREAK = 3;           // honest-when-called / caught-lying count that moves a bullet
+export const READ_STREAK = 2;      // right reads (bets) in a row-ish that take a bullet away
 export const MIN_BULLETS = 1, MAX_BULLETS = 5;
 export const BET_MS = 5500;      // betting window after a TIPU! call
 export const FLIP_MS = 750;      // per revealed card
@@ -202,7 +203,7 @@ export class Game {
       case 'liar': return this.callLiar(pid, now);
       case 'bet': {
         const r = s.reveal;
-        if (!r || r.stage !== 'bet' || !['lie', 'truth'].includes(a.pick)) return { ok: false };
+        if (!r || r.stage !== 'bet' || !['lie', 'truth', 'pass'].includes(a.pick)) return { ok: false };
         if (pid === r.caller || pid === r.target || r.bets[pid]) return { ok: false };
         r.bets[pid] = a.pick;
         this.emit({ type: 'bet', pid });
@@ -229,7 +230,7 @@ export class Game {
     s.bulletsEach = bulletsFor(s.settings, s.startCount);
     for (const p of s.players) {
       p.alive = true; p.hand = []; p.pulls = 0; p.reads = 0; p.bets = 0;
-      p.bullets = s.bulletsEach; p.honest = 0; p.caught = 0;
+      p.bullets = s.bulletsEach; p.honest = 0; p.caught = 0; p.goodReads = 0;
     }
     s.round = 0; s.deaths = []; s.winner = null; s.log = [];
     s.starter = s.players[rnd(s.players.length)].id;
@@ -363,8 +364,20 @@ export class Game {
         r.stage = 'flip';
         r.until = now + 900 + r.n * FLIP_MS;
         // score the bets now that the cards are about to turn
+        // living bettors have skin in the game: a wrong read loads a bullet, every 2 right reads remove one.
+        // PASS is always safe. Ghosts bet for glory only.
         const right = r.lie ? 'lie' : 'truth';
-        for (const [id, pick] of Object.entries(r.bets)) { const q = this.p(id); if (q) { q.bets++; if (pick === right) q.reads++; } }
+        const up = [], down = [];
+        for (const [id, pick] of Object.entries(r.bets)) {
+          const q = this.p(id);
+          if (!q || pick === 'pass') continue;
+          q.bets++;
+          if (pick === right) {
+            q.reads++;
+            if (q.alive) { q.goodReads = (q.goodReads || 0) + 1; if (q.goodReads >= READ_STREAK) { q.goodReads = 0; if (q.bullets > MIN_BULLETS) { q.bullets--; down.push(id); } } }
+          } else if (q.alive && q.bullets < MAX_BULLETS) { q.bullets++; up.push(id); }
+        }
+        r.readChanges = { up, down };
         this.emit({ type: 'flip', cards: r.cards, lie: r.lie, devil: r.devil, target: r.target, caller: r.caller, bets: r.bets });
         return true;
       }
@@ -391,6 +404,12 @@ export class Game {
         }
         this.log(r.devil ? `😈 The Devil card! Everyone else takes the gun` : r.lie ? `${this.p(r.target).name} lied` : `${this.p(r.target).name} told the truth`);
         this.emit({ type: 'verdict', lie: r.lie, devil: r.devil, shooters, target: r.target, caller: r.caller });
+        if (r.readChanges && (r.readChanges.up.length || r.readChanges.down.length)) {
+          const nm = (ids) => ids.map((id) => this.p(id).name).join(', ');
+          if (r.readChanges.up.length) this.log(`🎲 Wrong read, +1 bullet: ${nm(r.readChanges.up)}`);
+          if (r.readChanges.down.length) this.log(`🎯 Sharp reads, -1 bullet: ${nm(r.readChanges.down)}`);
+          this.emit({ type: 'reads', ...r.readChanges });
+        }
         return true;
       }
       if (r.stage === 'verdict') {
@@ -456,7 +475,7 @@ export class Game {
       winner: s.winner, deaths: s.deaths,
       players: s.players.map((q) => ({
         id: q.id, name: q.name, emoji: q.emoji, bot: q.bot, alive: q.alive, count: q.hand.length,
-        pulls: q.pulls, reads: q.reads, bets: q.bets, bullets: q.bullets, honest: q.honest, caught: q.caught, idle: q.idle || 0,
+        pulls: q.pulls, reads: q.reads, bets: q.bets, bullets: q.bullets, honest: q.honest, caught: q.caught, goodReads: q.goodReads || 0, idle: q.idle || 0,
       })),
       me: {
         hand: me.hand,

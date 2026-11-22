@@ -434,3 +434,33 @@ input { font: inherit; -webkit-user-select: text; user-select: text; }
 .id-msg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 4; display: none; flex-direction: column; gap: 10px; text-align: center; background: rgba(12,6,7,.94); border: 1.5px solid rgba(231,182,74,.5); border-radius: 20px; padding: 18px; width: min(86vw, 340px); font-size: 15px; cursor: default; }
 .id-msg.on { display: flex; }
 .id-msg b { font-family: Bungee, Impact, sans-serif; font-weight: 400; font-size: 44px; color: var(--gold2); }
+.btn.bet.pass { background: linear-gradient(180deg, #5d5560, #36303a); box-shadow: 0 4px 0 #1c181e; flex: 0.8 !important; }
+.bets .btn { padding: 13px 8px; }
+.stake { margin-top: 8px; font-size: 12px; color: var(--mut); }
+.stake b { color: #fff; }
+.betq.locked { animation: lockIn .25s cubic-bezier(.2,.9,.3,1.5); }
+@keyframes lockIn { from { transform: scale(1.25); } }
+.readsbox { position: absolute; left: 50%; bottom: calc(var(--safe-b) + 90px); transform: translateX(-50%); background: rgba(12,6,7,.95); border: 1.5px solid rgba(231,182,74,.5); border-radius: 14px; padding: 9px 14px; font-size: 13px; line-height: 1.6; max-width: 90vw; box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+
+/* ======================================================================
+   SPECTATORS: the shooter as a character
+   ====================================================================== */
+#gun.actor { background: radial-gradient(60% 50% at 50% 45%, #2e1517 0%, #0e0607 60%, #000 100%); }
+.a-stage { position: absolute; left: 0; right: 0; top: 16%; bottom: 14%; display: flex; align-items: center; justify-content: center; perspective: 900px; }
+.a-spot { position: absolute; left: 50%; top: -18%; width: 130%; height: 120%; transform: translateX(-50%); pointer-events: none;
+  background: conic-gradient(from 180deg at 50% 0%, transparent 0deg 158deg, rgba(255,226,170,.16) 168deg 192deg, transparent 202deg); filter: blur(6px); animation: spotFlicker 4s infinite; }
+@keyframes spotFlicker { 0%, 100% { opacity: 1; } 47% { opacity: .85; } 50% { opacity: .55; } 53% { opacity: .9; } }
+.a-wrap { height: 100%; aspect-ratio: 400 / 620; max-width: 92vw; transform-style: preserve-3d; animation: actorSway 6s ease-in-out infinite; filter: drop-shadow(0 30px 30px rgba(0,0,0,.8)); }
+@keyframes actorSway { 0%, 100% { transform: rotateY(-14deg) rotateX(4deg); } 50% { transform: rotateY(12deg) rotateX(2deg); } }
+#gun.bang .a-wrap, #gun.click .a-wrap { animation-play-state: paused; }
+.a-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.a-sweat { transition: opacity .3s; }
+.a-flash { transform-box: fill-box; transform-origin: center; }
+.a-blood { position: absolute; inset: 0; pointer-events: none; }
+.a-blood i { position: absolute; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ff4d5e, #8e0d1b 70%); }
+#gun.dead .a-svg { filter: grayscale(.85) brightness(.6); transition: filter 1s; }
+.a-ghost { position: absolute; left: 50%; top: 35%; font-size: 70px; opacity: 0; transform: translate(-50%, 40px); pointer-events: none; }
+.a-ghost.on { animation: ghostRise 2.6s ease-out forwards; }
+@keyframes ghostRise { 0% { opacity: 0; transform: translate(-50%, 60px) scale(.6); } 30% { opacity: .95; } 100% { opacity: .85; transform: translate(-50%, -90px) scale(1.15); } }
+#gun.actor .g-hint { bottom: calc(var(--safe-b) + 24px); }
+#gun.actor .g-result { bottom: 8%; }

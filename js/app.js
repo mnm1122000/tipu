@@ -1,6 +1,7 @@
 // TIPU! — app: screens, host loop, client flow, table animations, the reveal and the gun.
 import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK } from './engine.js?v=1';
 import { openIdle } from './idle.js?v=1';
+import { Actor } from './actor.js?v=1';
 import * as net from './net.js?v=1';
 import { sfx, vibrate } from './sfx.js?v=1';
 import { Revolver } from './gun.js?v=1';
@@ -314,7 +315,7 @@ function runBots(now) {
   const g = App.game, s = g.s;
   let changed = false;
   if (s.phase === 'reveal' && s.reveal.stage === 'bet') {
-    for (const b of g.bettors()) if (b.bot && !s.reveal.bets[b.id] && Math.random() < 0.05) { g.handle(b.id, { type: 'bet', pick: Math.random() < 0.5 ? 'lie' : 'truth' }, now); changed = true; }
+    for (const b of g.bettors()) if (b.bot && !s.reveal.bets[b.id] && Math.random() < 0.05) { g.handle(b.id, { type: 'bet', pick: ['lie', 'truth', 'pass'][Math.floor(Math.random() * 3)] }, now); changed = true; }
   }
   if (s.phase === 'gun') {
     for (const id of s.gun.shooters) {
@@ -564,6 +565,19 @@ function onFx(e) {
       break;
     }
     case 'bet': if (e.pid !== App.me) sfx.play('bet'); break;
+    case 'reads': {
+      const nm = (ids) => ids.map((id) => esc(NameOf(id))).join(', ');
+      setTimeout(() => {
+        if (e.up.includes(App.me)) { sfx.play('cock'); vibrate([60, 40, 60]); toast(`🎲 Wrong read: +1 bullet (now ${P(App.me)?.bullets ?? '?'} in 6)`, 3200); }
+        else if (e.down.includes(App.me)) { sfx.play('relief'); toast(`🎯 Sharp reads: −1 bullet (now ${P(App.me)?.bullets ?? '?'} in 6)`, 3200); }
+        const el = document.createElement('div');
+        el.className = 'readsbox';
+        el.innerHTML = `${e.up.length ? `<div>🎲 <b>+1 bullet</b> (wrong read): ${nm(e.up)}</div>` : ''}${e.down.length ? `<div>🎯 <b>−1 bullet</b> (sharp reads): ${nm(e.down)}</div>` : ''}`;
+        $('#fx').appendChild(el);
+        el.animate([{ transform: 'translate(-50%, 20px)', opacity: 0 }, { transform: 'translate(-50%, 0)', opacity: 1, offset: 0.1 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }], { duration: 3800 }).onfinish = () => el.remove();
+      }, 900);
+      break;
+    }
     case 'flip': {
       App.flip = { key: v ? `${v.round}:${e.caller}:${e.target}` : '', at: Date.now(), cards: e.cards };
       sfx.play('drum', { len: 0.8 });
@@ -665,7 +679,12 @@ function openGun(pid, watch, v) {
   const p = P(pid);
   if (!p) return;
   const multi = v.gun.shooters.length > 1;
-  const r = new Revolver({
+  // the gun itself only appears on the shooter's phone; everyone else watches the shooter as a character
+  const r = watch ? new Actor({
+    name: p.name, photo: App.avatars[pid] || null, emoji: p.emoji, pulls: p.pulls, bullets: p.bullets || 1,
+    extra: multi ? `😈 ${v.gun.shooters.length} guns out: ${v.gun.shooters.map((id) => esc(nameOf(id))).join(', ')}` : '',
+    onResult: () => { if (App.gun) App.gun.resultAt = Date.now(); },
+  }) : new Revolver({
     watch, name: p.name, pulls: p.pulls, bullets: p.bullets || 1, live: watch ? null : v.me.live,
     extra: multi ? `😈 ${v.gun.shooters.length} guns out: ${v.gun.shooters.map((id) => esc(nameOf(id))).join(', ')}` : '',
     onFire: () => act({ type: 'fire' }),
@@ -828,7 +847,7 @@ function rLobby(v) {
       <div class="setrow"><span class="k">🌀 Round twists</span><div class="chips">${chip('twists', 0, 'Off', !s.twists)}${chip('twists', 1, 'On', s.twists)}</div></div>
       <div class="small setnote">From round 2, some rounds get a twist: ↺ turns go counter-clockwise, 📢 anyone can call TIPU!, or 🚫 no Jokers.</div>
       <div class="setrow"><span class="k">👻 Bets on calls</span><div class="chips">${chip('bets', 0, 'Off', !s.bets)}${chip('bets', 1, 'On', s.bets)}</div></div>
-      <div class="small setnote">Everyone not in the call (dead players too) bets LIE or TRUTH before the reveal.</div>
+      <div class="small setnote">Everyone not in the call bets LIE, TRUTH or PASS before the reveal. Alive: wrong = +1 bullet, 2 right = −1 bullet. Ghosts bet for glory.</div>
       <div class="deckline">Deck for ${Math.max(2, n)}: <b>${mix.K}</b> Kings · <b>${mix.Q}</b> Queens · <b>${mix.A}</b> Aces · <b>${mix.J}</b> Jokers${mix.D ? ' · <b>1</b> Devil' : ''} · ${HAND} each</div>
     </div>
   </div>
@@ -934,10 +953,16 @@ function revealHTML(v) {
   let mid = '';
   if (r.stage === 'bet') {
     const left = Math.max(0, Math.ceil(((App.betAt || Date.now()) - Date.now()) / 1000));
-    if (r.canBet && !r.myBet) mid = `<div class="betq">${P(App.me)?.alive ? 'Was it a lie?' : '👻 Ghost bet: was it a lie?'}</div><div class="bets"><button class="btn bet lie" data-act="bet" data-v="lie">🤥 LIE</button><button class="btn bet truth" data-act="bet" data-v="truth">😇 TRUTH</button></div>`;
-    else if (r.myBet) mid = `<div class="betq">You bet <b>${r.myBet === 'lie' ? '🤥 LIE' : '😇 TRUTH'}</b></div>`;
+    // a tap locks the bet on this phone straight away; the host confirms in the background
+    const myBet = r.myBet || (App.localBet && App.localBet.key === flipKey(v) ? App.localBet.pick : null);
+    const aliveMe = P(App.me)?.alive;
+    const BET_LABEL = { lie: '🤥 LIE', truth: '😇 TRUTH', pass: '😶 PASS' };
+    if (r.canBet && !myBet) mid = `<div class="betq">${aliveMe ? 'Was it a lie?' : '👻 Ghost bet: was it a lie?'}</div>
+      <div class="bets"><button class="btn bet lie" data-act="bet" data-v="lie">🤥 LIE</button><button class="btn bet pass" data-act="bet" data-v="pass">😶 PASS</button><button class="btn bet truth" data-act="bet" data-v="truth">😇 TRUTH</button></div>
+      <div class="stake">${aliveMe ? `Wrong = <b>+1 bullet</b> · ${2 - (P(App.me)?.goodReads || 0)} more right = <b>−1 bullet</b> · PASS is safe` : 'Ghost bets are for glory only'}</div>`;
+    else if (myBet) mid = `<div class="betq locked">🔒 You bet <b>${BET_LABEL[myBet]}</b></div>`;
     else mid = `<div class="betq">${r.target === App.me ? 'Keep a straight face…' : 'The table is betting…'}</div>`;
-    mid += `<div class="betbar"><i style="animation-duration:${Math.max(0.2, ((App.betAt || Date.now()) - Date.now()) / 1000)}s"></i></div><div class="small">${r.betCount} bet${r.betCount === 1 ? '' : 's'} in · ${left}s</div>`;
+    mid += `<div class="betbar"><i style="animation-duration:${BET_MS}ms;animation-delay:${-Math.max(0, BET_MS - ((App.betAt || Date.now()) - Date.now()))}ms"></i></div><div class="small">${r.betCount} bet${r.betCount === 1 ? '' : 's'} in · ${left}s</div>`;
   } else if (r.stage === 'verdict' || allShown) {
     const lie = r.lie ?? (cards && cards.some((c) => !(c.r === v.table || c.r === 'J' || c.r === 'D')));
     const devil = r.devil ?? (cards && cards.some((c) => c.r === 'D'));
@@ -1083,7 +1108,7 @@ function rulesHTML() {
   return `<div class="title">How to play TIPU!</div><div class="rules">
     <h4>The table</h4><ul><li>2–10 players, one phone each. One phone hosts, the rest scan the QR code. The host drags everyone to where they really sit, and turns go clockwise from those seats.</li><li>Every round everyone gets <b>5 cards</b>. The deck is Kings, Queens, Aces and a few <b>Jokers</b> (wild), and grows with the table. At the start of each round the phone shows exactly how many of each are in the deck. Tap the bar at the top to see it again.</li><li>Each round the phone picks a <b>table card</b>: King, Queen or Ace.</li></ul>
     <h4>Your turn</h4><ul><li>Put down <b>1 to 3 cards face down</b>, claiming they are all the table card. Jokers count as the table card. You may lie.</li><li>Or, if someone played before you, shout <b>TIPU!</b> (liar).</li><li>Out of cards? You're skipped. If everyone else is empty, the next player <b>must</b> call TIPU!</li></ul>
-    <h4>TIPU!</h4><ul><li>The cards are turned over. If <b>any</b> card isn't the table card or a Joker, the liar takes the gun. If they were all true, the <b>caller</b> takes the gun.</li><li>Before the reveal, everyone else (the dead too 👻) bets <b>LIE</b> or <b>TRUTH</b>. The sharpest reader gets an award at the end.</li></ul>
+    <h4>TIPU!</h4><ul><li>The cards are turned over. If <b>any</b> card isn't the table card or a Joker, the liar takes the gun. If they were all true, the <b>caller</b> takes the gun.</li><li>Before the reveal, everyone else bets <b>LIE</b>, <b>TRUTH</b> or <b>PASS</b>. If you're alive it's for real: a <b>wrong read loads +1 bullet</b>, every <b>2 right reads remove 1</b>, PASS is safe. Ghosts 👻 bet for glory. The sharpest reader gets an award at the end.</li></ul>
     <h4>The gun</h4><ul><li>You start with <b>1 bullet</b> (2 when 7+ players start, on Auto). Every pull is a fresh spin: <b>bullets in 6</b> chance, every time.</li><li>You see your bullets in the cylinder and can move them around, then load the gun. Swipe across the cylinder to spin it, drag the hammer back if you like, then press the trigger and pull.</li></ul>
     <h4>Bullets move</h4><ul><li>😇 Called a liar while telling the truth <b>${STREAK} times</b>: <b>−1 bullet</b> (never below 1).</li><li>🤥 Caught lying <b>${STREAK} times</b>: <b>+1 bullet</b> (up to 5).</li></ul>
     <h4>🌀 Round twists</h4><ul><li>From round 2, some rounds get a twist: <b>↺ Counter-clockwise</b> (turns go the other way), <b>📢 Anyone can call</b> (anyone can shout TIPU! on the last play), <b>🚫 No Jokers</b>.</li></ul>
@@ -1236,7 +1261,14 @@ document.addEventListener('click', async (e) => {
     }
     case 'play': playSelected(); break;
     case 'liar': App.sel.clear(); act({ type: 'liar' }); break;
-    case 'bet': act({ type: 'bet', pick: t.dataset.v }); sfx.play('bet'); vibrate(15); break;
+    case 'bet': {
+      if (!v || !v.reveal) break;
+      App.localBet = { key: flipKey(v), pick: t.dataset.v };
+      sfx.play('bet'); vibrate(15);
+      paintReveal();
+      act({ type: 'bet', pick: t.dataset.v });
+      break;
+    }
     case 'skipTurn': closeModal(); act({ type: 'skipTurn' }); break;
     case 'endGame': if (confirm('End the game now?')) { closeModal(); act({ type: 'end' }); } break;
     case 'closeTable': if (confirm('Close this table for everyone?')) { closeModal(); closeTable(); } break;
@@ -1345,7 +1377,7 @@ window.__bench = {
     if (!v || !App.mode) return;
     if (App.gun && App.gun.pid === App.me && App.gun.r.result === null) { if (this.autoGun) setTimeout(() => App.gun && App.gun.r.autoPlay(), 1500); return; }
     if (!this.auto) return;
-    if (v.phase === 'reveal' && v.reveal.stage === 'bet' && v.reveal.canBet && !v.reveal.myBet && Math.random() < 0.5) { act({ type: 'bet', pick: Math.random() < 0.5 ? 'lie' : 'truth' }); return; }
+    if (v.phase === 'reveal' && v.reveal.stage === 'bet' && v.reveal.canBet && !v.reveal.myBet && Math.random() < 0.5) { act({ type: 'bet', pick: ['lie', 'truth', 'pass'][Math.floor(Math.random() * 3)] }); return; }
     if (v.phase === 'play' && v.turn !== App.me && v.canCall && Math.random() < 0.06) { act({ type: 'liar' }); return; }
     if (v.phase === 'play' && v.turn === App.me) {
       if (this._turn === v.pile + ':' + v.round) return;

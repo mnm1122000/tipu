@@ -52,6 +52,30 @@ ok(bulletsFor({ bullets: 'auto' }, 7) === 2 && bulletsFor({ bullets: 'auto' }, 6
   call(false); call(false); call(false); ok(a.bullets === 2 && a.honest === 0, 'three truths: -1 bullet');
 }
 
+// bets with stakes: wrong read +1 bullet, 2 right reads -1 bullet, pass is safe
+{
+  const g = Game.create('T', { id: 'a', name: 'A' });
+  for (const id of ['b', 'c', 'd', 'e']) g.addPlayer({ id, name: id });
+  g.s.settings.timer = 0; g.s.settings.bullets = 2; g.start(0);
+  const s = g.s, a = g.p('a');
+  const round = (picks) => {
+    s.phase = 'play'; s.turn = 'a'; s.forced = false; s.gun = null;
+    a.hand = [{ id: 8000 + Math.floor(Math.random() * 999), r: s.table }];
+    g.handle('a', { type: 'play', cards: [a.hand[0].id] }, 0);
+    const caller = s.turn;
+    g.handle(caller, { type: 'liar' }, 0);
+    for (const [id, pick] of Object.entries(picks)) if (id !== caller) ok(g.handle(id, { type: 'bet', pick }, 0).ok, 'bet ' + pick);
+    let t = 0; while (s.phase === 'reveal') { t += 100; g.tick(t); }
+    return caller;
+  };
+  const c1 = round({ c: 'lie', d: 'truth', e: 'pass' });   // it was the truth
+  const who = (id) => g.p(id).bullets;
+  ok(c1 !== 'c' ? who('c') === 3 : true, 'wrong read: +1 bullet');
+  ok(who('e') === 2, 'pass is safe');
+  round({ d: 'truth' });
+  ok(who('d') === 1, 'two right reads: -1 bullet');
+}
+
 // seats arranged on the virtual table set the turn order (clockwise)
 {
   const g = Game.create('T', { id: 'a', name: 'A' });
@@ -165,7 +189,7 @@ for (let n = 2; n <= MAX_PLAYERS; n++) {
           ok(g.handle(me.id, { type: 'play', cards }, t).ok, 'play ' + JSON.stringify(cards));
         }
       } else if (s.phase === 'reveal') {
-        if (s.reveal.stage === 'bet') for (const q of g.bettors()) if (Math.random() < 0.5) g.handle(q.id, { type: 'bet', pick: Math.random() < 0.5 ? 'lie' : 'truth' }, t);
+        if (s.reveal.stage === 'bet') for (const q of g.bettors()) if (Math.random() < 0.5) g.handle(q.id, { type: 'bet', pick: ['lie', 'truth', 'pass'][Math.floor(Math.random() * 3)] }, t);
         g.tick(t);
       } else if (s.phase === 'gun') {
         for (const id of s.gun.shooters) if (Math.random() < 0.5) g.handle(id, { type: 'fire' }, t);

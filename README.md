@@ -13,7 +13,7 @@ A bluffing card game for 2–10 players in the same room. Each player uses their
 2. **Round intro.** Every round opens with a full-screen card: the **table card** (King, Queen or Ace) and exactly **how many Kings, Queens, Aces, Jokers (and the Devil)** are in the deck, counting up with animation. A small bar at the top of the table keeps the counts, the direction, the twist and your own gun (tap it to replay the intro).
 3. **Play.** On your turn, select 1–3 cards and swipe them up (or tap *Play*). They go face down, and you're claiming they're all the table card. **Jokers** count as the table card. You can lie.
 4. **TIPU!** Instead of playing, shout **TIPU!** (liar) at the last play. Out of cards? You're skipped. If everyone else is empty, the next player has to call.
-5. **Bets.** Before the cards turn, everyone not in the call (dead players too 👻) bets **LIE** or **TRUTH**. The best reader gets an award at the end.
+5. **Bets.** Before the cards turn, everyone not in the call bets **LIE**, **TRUTH** or **PASS** (the tap locks instantly). Alive players have real stakes: a **wrong read loads +1 bullet**, every **2 right reads remove 1**, PASS is safe. Ghosts 👻 bet for glory. The best reader gets an award at the end.
 6. **Reveal.** If any card isn't the table card or a Joker, the liar takes the gun. If they were all true, the **caller** takes the gun.
 7. **The gun.** The shooter's phone becomes a revolver:
    - the cylinder swings out and shows **how many bullets are loaded out of 6**. Drag bullets to other chambers if you like.
@@ -22,7 +22,7 @@ A bluffing card game for 2–10 players in the same room. Each player uses their
    - optional: **drag the hammer back** to cock it (lighter trigger)
    - **press the trigger and pull it down** until it breaks → **BANG** (muzzle flash, recoil, smoke, cracked screen, red out) or ***click*** (heartbeat, relief)
 
-   Everyone else watches a live mirror of the same gun.
+   The gun only appears on the shooter's phone. Everyone else watches the shooter as a **character in a spotlight with their profile picture as the face**, raising the revolver to the temple, sweating and shaking harder as the real trigger tightens, then **BANG** (flash, splatter, the body slumps, a ghost rises) or ***click*** (relief).
 
    **Odds:** every pull is a fresh spin, so the chance is simply **your bullets in 6**, every time (2 bullets = 2/6). Moving bullets and spinning are for show only.
 8. **Bullets move.** Called a liar while telling the truth **3 times** → **−1 bullet** (never below 1). Caught lying **3 times** → **+1 bullet** (up to 5).
