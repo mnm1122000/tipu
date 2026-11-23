@@ -2,8 +2,8 @@
 // 1920s-style character under a spotlight. Their whole head is their profile picture. They wear the
 // outfit they picked in the wardrobe and hold the revolver they picked. The arm follows the shooter's
 // real phone live (gun comes up, finger tightens on the trigger), then BANG or *click*.
-import { sfx, vibrate } from './sfx.js?v=6';
-import { sideGunSVG, muzzleX, GUNS } from './gun.js?v=6';
+import { sfx, vibrate } from './sfx.js?v=7';
+import { sideGunSVG, muzzleX, GUNS } from './gun.js?v=7';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -18,6 +18,20 @@ const GRIP = [275, 400];         // the point on the revolver drawing the hand h
 const GUN_SCALE = 0.105;
 const DOWN = { w: [214, 396], a: 100 };   // wrist position + gun angle with the gun at the hip
 const TEMPLE = [HEAD[0] + HEAD_R - 2, 112];
+const L_SHOULDER = [100, 212];
+const REST = [96, 386];                   // where the free hand hangs
+
+// how the shooter holds it. m = where the muzzle ends up, a = gun angle (180 = pointing left), bend = which way the elbow folds,
+// kick = head jolt on a bang [dx, dy, tilt], splat = [x, y, direction] of the blood. 'left' is 'temple' with the figure mirrored.
+export const STYLES = {
+  temple: { hint: 'Gun to the head…', m: TEMPLE, a: 180, bend: 1, kick: [-12, 0, -30], splat: [HEAD[0] - HEAD_R + 6, HEAD[1], Math.PI] },
+  left: { hint: 'Left hand, gun to the head…', mirror: true, m: TEMPLE, a: 180, bend: 1, kick: [-12, 0, -30], splat: [HEAD[0] - HEAD_R + 6, HEAD[1], Math.PI] },
+  mouth: { hint: 'Barrel in the mouth…', m: [150, 156], a: 180, bend: 1, kick: [0, -10, 10], splat: [150, 66, -Math.PI / 2] },
+  chin: { hint: 'Both hands, under the chin…', two: true, m: [150, 184], a: 270, bend: -1, kick: [0, -16, 6], splat: [150, 60, -Math.PI / 2] },
+  chest: { hint: 'Gun to the heart…', m: [134, 268], a: 200, bend: -1, kick: [0, 8, 16], splat: [130, 268, Math.PI * 0.85] },
+};
+export const STYLE_KEYS = Object.keys(STYLES);
+const styleOf = (k) => STYLES[k] || STYLES.temple;
 
 // ---------------------------------------------------------------- wardrobe
 // g: m / f · top: suit | shirt | vest | trench | overcoat | dress | pantsuit | melayu | hijabdress
@@ -178,30 +192,41 @@ function fist(o) {
     <path d="M-6 -12 Q-4 -19 3 -19" stroke="${sk}" stroke-width="6" stroke-linecap="round" fill="none"/>`;
 }
 
-// two-bone arm: the wrist travels from the hip to the temple, the elbow bends outwards
-function armPose(t, gunKind) {
-  const k = ease(clamp(t, 0, 1));
-  const muzz = [(muzzleX(gunKind) - GRIP[0]) * GUN_SCALE, (178 - GRIP[1]) * GUN_SCALE];
-  // pointing left (180°) with the drawing flipped so the grip stays down: muzzle sits at (-mx, +my) from the wrist
-  const wUp = [TEMPLE[0] + muzz[0], TEMPLE[1] - muzz[1]];
-  const w = [lerp(DOWN.w[0], wUp[0], k), lerp(DOWN.w[1], wUp[1], k)];
-  const ang = lerp(DOWN.a, 180, k);
-  const dx = w[0] - SHOULDER[0], dy = w[1] - SHOULDER[1];
+const rot = (x, y, deg) => { const a = deg * Math.PI / 180; return [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)]; };
+// two-bone IK: elbow for a wrist at w; bend picks which of the two solutions
+function elbow(sh, w, bend) {
+  const dx = w[0] - sh[0], dy = w[1] - sh[1];
   const d = clamp(Math.hypot(dx, dy), 1, L1 + L2 - 0.5);
   const base = Math.atan2(dy, dx);
-  const alpha = Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
-  const e = [SHOULDER[0] + L1 * Math.cos(base + alpha), SHOULDER[1] + L1 * Math.sin(base + alpha)];
-  const a = ang * Math.PI / 180;
-  const mx = muzz[0], my = -muzz[1];
-  const m = [w[0] + mx * Math.cos(a) - my * Math.sin(a), w[1] + mx * Math.sin(a) + my * Math.cos(a)];
-  return { w, e, ang, m };
+  const al = bend * Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+  return [sh[0] + L1 * Math.cos(base + al), sh[1] + L1 * Math.sin(base + al)];
+}
+// the gun arm travels from the hip to the style's spot; a two-handed style brings the free hand up to cup the gun hand
+function armPose(t, gunKind, S = STYLES.temple) {
+  const k = ease(clamp(t, 0, 1));
+  // muzzle offset from the wrist in the hand's (flipped) frame
+  const mx = (muzzleX(gunKind) - GRIP[0]) * GUN_SCALE, my = (GRIP[1] - 178) * GUN_SCALE;
+  const off = rot(mx, my, S.a);
+  const wUp = [S.m[0] - off[0], S.m[1] - off[1]];
+  const w = [lerp(DOWN.w[0], wUp[0], k), lerp(DOWN.w[1], wUp[1], k)];
+  const ang = lerp(DOWN.a, S.a, k);
+  const e = elbow(SHOULDER, w, S.bend);
+  const mo = rot(mx, my, ang);
+  const out = { w, e, ang, m: [w[0] + mo[0], w[1] + mo[1]] };
+  if (S.two) {
+    out.w2 = [lerp(REST[0], wUp[0] - 13, k), lerp(REST[1], wUp[1] + 8, k)];
+    out.e2 = elbow(L_SHOULDER, out.w2, 1);
+  }
+  return out;
 }
 const handTf = (w, ang) => `translate(${w[0].toFixed(1)} ${w[1].toFixed(1)}) rotate(${ang.toFixed(1)}) scale(1 -1)`;
 
 export function lookOf(outfit) { return OUTFITS[((outfit ?? 0) % OUTFITS.length + OUTFITS.length) % OUTFITS.length]; }
 
 // the whole character as one SVG (wardrobe previews use it too)
-export function characterSVG(look, id, { pose = 'up' } = {}) {
+export function characterSVG(look, id, { pose = 'up', style = 'temple' } = {}) {
+  const S = styleOf(style);
+  const flip = S.mirror ? ' transform="translate(300 0) scale(-1 1)"' : '';
   const o = { ...lookOf(look.outfit), k: id };
   const gunKind = GUNS[look.gun] ? look.gun : 'classic';
   const gun = sideGunSVG('_c' + id, gunKind).replace(/<svg class="g-side"[^>]*>/, '<svg x="0" y="0" width="1000" height="560" viewBox="0 0 1000 560" overflow="visible">');
@@ -209,7 +234,7 @@ export function characterSVG(look, id, { pose = 'up' } = {}) {
     ? `<image href="${look.photo}" x="${HEAD[0] - HEAD_R}" y="${HEAD[1] - HEAD_R}" width="${HEAD_R * 2}" height="${HEAD_R * 2}" clip-path="url(#cFace${id})" preserveAspectRatio="xMidYMid slice"/>`
     : `<circle cx="${HEAD[0]}" cy="${HEAD[1]}" r="${HEAD_R}" fill="${o.skin}"/><text x="${HEAD[0]}" y="${HEAD[1] + 40}" font-size="116" text-anchor="middle">${esc(look.emoji || '🙂')}</text>`;
   const sl = sleeveOf(o), cuff = cuffOf(o);
-  const arm = armPose(pose === 'up' ? 1 : 0, gunKind);
+  const arm = armPose(pose === 'up' ? 1 : 0, gunKind, S);
   const thin = o.top === 'dress';
   return `<svg class="a-svg" viewBox="0 0 300 680" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -218,21 +243,23 @@ export function characterSVG(look, id, { pose = 'up' } = {}) {
     <radialGradient id="cFlash${id}" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff"/><stop offset=".35" stop-color="#ffe9a0"/><stop offset=".7" stop-color="#ff8a1f" stop-opacity=".8"/><stop offset="1" stop-color="#ff3d00" stop-opacity="0"/></radialGradient>
   </defs>
   <ellipse class="a-shadow" cx="150" cy="664" rx="96" ry="12" fill="rgba(0,0,0,.55)"/>
-  <g class="a-fig">
+  <g class="a-fig"${flip}>
     ${legs(o)}
     <g class="a-upper">
       ${hijabBack(o)}${hairBack(o)}
       <path d="M138 172 L162 172 L164 204 Q150 210 136 204 Z" fill="${o.skin}"/><path d="M138 192 Q150 198 162 192" stroke="rgba(0,0,0,.18)" stroke-width="3" fill="none"/>
       ${torso(o)}${jewels(o)}
-      ${restArm(o)}
-      <g class="a-head">
+      ${S.two ? '' : restArm(o)}
+      <g class="a-head"><g${flip}>
         <circle cx="${HEAD[0]}" cy="${HEAD[1]}" r="${HEAD_R + 3}" fill="#120708"/>
         ${face}
         <circle cx="${HEAD[0]}" cy="${HEAD[1]}" r="${HEAD_R}" fill="url(#cShade${id})"/>
         ${hijabFront(o)}${hatSVG(o)}
         <g class="a-sweat" style="opacity:0"><path d="M96 88 q-6 12 0 16 q6 -4 0 -16 Z" fill="#bfe7ff"/><path d="M110 70 q-5 10 0 13 q5 -3 0 -13 Z" fill="#bfe7ff"/></g>
-      </g>
+      </g></g>
       <g class="a-arm">
+        ${S.two ? `<line class="a-up2" x1="${L_SHOULDER[0]}" y1="${L_SHOULDER[1]}" x2="${arm.e2[0].toFixed(1)}" y2="${arm.e2[1].toFixed(1)}" stroke="${sl}" stroke-width="${thin ? 15 : 22}" stroke-linecap="round"/>
+        <line class="a-fore2" x1="${arm.e2[0].toFixed(1)}" y1="${arm.e2[1].toFixed(1)}" x2="${arm.w2[0].toFixed(1)}" y2="${arm.w2[1].toFixed(1)}" stroke="${sl}" stroke-width="${thin ? 13 : 19}" stroke-linecap="round"/>` : ''}
         <line class="a-up" x1="${SHOULDER[0]}" y1="${SHOULDER[1]}" x2="${arm.e[0].toFixed(1)}" y2="${arm.e[1].toFixed(1)}" stroke="${sl}" stroke-width="${thin ? 15 : 22}" stroke-linecap="round"/>
         <line class="a-fore" x1="${arm.e[0].toFixed(1)}" y1="${arm.e[1].toFixed(1)}" x2="${arm.w[0].toFixed(1)}" y2="${arm.w[1].toFixed(1)}" stroke="${sl}" stroke-width="${thin ? 13 : 19}" stroke-linecap="round"/>
         <g class="a-hand" transform="${handTf(arm.w, arm.ang)}">
@@ -240,6 +267,7 @@ export function characterSVG(look, id, { pose = 'up' } = {}) {
           ${cuff ? `<path d="M-14 6 L-14 -10" stroke="${cuff}" stroke-width="6" stroke-linecap="round"/>` : ''}
           ${fist(o)}
         </g>
+        ${S.two ? `<g class="a-hand2" transform="translate(${arm.w2[0].toFixed(1)} ${arm.w2[1].toFixed(1)})"><rect x="-11" y="-12" width="22" height="23" rx="8" fill="${o.skin}"/><path d="M-8 -4 L7 -4 M-8 2 L7 2" stroke="rgba(0,0,0,.2)" stroke-width="1.6" stroke-linecap="round"/>${cuff ? `<path d="M-15 -8 L-15 8" stroke="${cuff}" stroke-width="6" stroke-linecap="round"/>` : ''}</g>` : ''}
         <g class="a-flash" opacity="0" transform="translate(${arm.m[0].toFixed(1)} ${arm.m[1].toFixed(1)})"><circle cx="0" cy="0" r="40" fill="url(#cFlash${id})"/></g>
       </g>
     </g>
@@ -254,6 +282,7 @@ export class Actor {
     this.watch = true;
     this.id = 'a' + Math.random().toString(36).slice(2, 8);
     this.gunKind = GUNS[opts.gun] ? opts.gun : 'classic';
+    this.S = styleOf(opts.style);
     this.stage = 'load';
     this.result = null;
     this.live = null;
@@ -276,7 +305,7 @@ export class Actor {
           <div class="g-pct">Pull #${(o.pulls || 0) + 1} · <b>${o.bullets || 1} in 6</b> chance</div></div>
         ${o.extra ? `<div class="g-extra">${o.extra}</div>` : ''}
       </div>
-      <div class="a-stage"><div class="a-spot"></div><div class="a-wrap">${characterSVG(o, this.id, { pose: 'down' })}</div><div class="a-blood"></div><div class="a-ghost">👻</div></div>
+      <div class="a-stage"><div class="a-spot"></div><div class="a-wrap">${characterSVG(o, this.id, { pose: 'down', style: o.style })}</div><div class="a-blood"></div><div class="a-ghost">👻</div></div>
       <div class="g-hint"></div>
       <div class="g-white"></div>
       <div class="g-result"></div>
@@ -284,7 +313,7 @@ export class Actor {
     document.body.appendChild(el);
     this.el = el;
     this.q = (s) => el.querySelector(s);
-    this.parts = { up: this.q('.a-up'), fore: this.q('.a-fore'), hand: this.q('.a-hand'), flash: this.q('.a-flash'), head: this.q('.a-head'), upper: this.q('.a-upper'), legs: this.q('.a-legs'), sweat: this.q('.a-sweat'), hammer: this.q('.a-gun .g-hammer'), trigger: this.q('.a-gun .g-trigger') };
+    this.parts = { up: this.q('.a-up'), fore: this.q('.a-fore'), hand: this.q('.a-hand'), flash: this.q('.a-flash'), head: this.q('.a-head'), upper: this.q('.a-upper'), legs: this.q('.a-legs'), sweat: this.q('.a-sweat'), hammer: this.q('.a-gun .g-hammer'), up2: this.q('.a-up2'), fore2: this.q('.a-fore2'), hand2: this.q('.a-hand2'), trigger: this.q('.a-gun .g-trigger') };
     el.addEventListener('click', (e) => { const b = e.target.closest('[data-g]'); if (b) { e.stopPropagation(); el.classList.toggle('mini'); } });
     el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300 });
     this.hint('Loading the gun…');
@@ -300,7 +329,7 @@ export class Actor {
     this.stage = 'closed';
     this.tTo = 1;
     sfx.play('close');
-    this.hint('Gun to the head…');
+    this.hint(this.S.hint);
     this.heartT = setInterval(() => { if (this.stage === 'closed' && this.trig > 0.15) sfx.play('heart'); }, 950);
   }
 
@@ -384,13 +413,16 @@ export class Actor {
     const r = svg.getBoundingClientRect(), b = box.getBoundingClientRect();
     const s = r.height / 680;
     const ox = r.left + (r.width - 300 * s) / 2;
-    const x = ox + (HEAD[0] - HEAD_R + 6) * s - b.left, y = r.top + HEAD[1] * s - b.top;
+    const [sx0, sy0, dir0] = this.S.splat;
+    const mir = this.S.mirror;
+    const x = ox + (mir ? 300 - sx0 : sx0) * s - b.left, y = r.top + sy0 * s - b.top;
+    const dir = mir ? Math.PI - dir0 : dir0;
     for (let i = 0; i < 22; i++) {
       const d = document.createElement('i');
       const sz = 4 + Math.random() * 10;
       d.style.cssText = `left:${x}px;top:${y}px;width:${sz}px;height:${sz}px`;
       box.appendChild(d);
-      const a = Math.PI + (Math.random() - 0.5) * 1.3;
+      const a = dir + (Math.random() - 0.5) * 1.3;
       const dist = 60 + Math.random() * 150;
       d.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: `translate(${Math.cos(a) * dist}px, ${Math.sin(a) * dist + 40 + Math.random() * 60}px) scale(.6)`, opacity: 0.85, offset: 0.6 }, { transform: `translate(${Math.cos(a) * dist}px, ${Math.sin(a) * dist + 120}px) scale(.5)`, opacity: 0 }], { duration: 1200 + Math.random() * 600, easing: 'cubic-bezier(.2,.7,.4,1)', fill: 'forwards' });
     }
@@ -401,18 +433,27 @@ export class Actor {
     this.last = now;
     this.t += (this.tTo - this.t) * Math.min(1, dt * (this.tTo < this.t ? 2.5 : 3.2));
     const P = this.parts;
-    const arm = armPose(this.t, this.gunKind);
+    const S = this.S;
+    const arm = armPose(this.t, this.gunKind, S);
     const fear = this.stage === 'closed' || this.stage === 'fired' ? 0.5 + this.trig * 3 : this.stage === 'load' ? 0.3 : 0;
     const sx = (Math.random() - 0.5) * fear, sy = (Math.random() - 0.5) * fear;
     const w = [arm.w[0] + sx, arm.w[1] + sy];
     P.up.setAttribute('x2', arm.e[0].toFixed(1)); P.up.setAttribute('y2', arm.e[1].toFixed(1));
     P.fore.setAttribute('x1', arm.e[0].toFixed(1)); P.fore.setAttribute('y1', arm.e[1].toFixed(1));
     P.fore.setAttribute('x2', w[0].toFixed(1)); P.fore.setAttribute('y2', w[1].toFixed(1));
+    if (P.hand2) {
+      // the free hand stays on the gun hand until the gun falls
+      const w2 = this.gunFall && now > this.gunFall ? arm.w2 : [arm.w2[0] + sx, arm.w2[1] + sy];
+      P.up2.setAttribute('x2', arm.e2[0].toFixed(1)); P.up2.setAttribute('y2', arm.e2[1].toFixed(1));
+      P.fore2.setAttribute('x1', arm.e2[0].toFixed(1)); P.fore2.setAttribute('y1', arm.e2[1].toFixed(1));
+      P.fore2.setAttribute('x2', w2[0].toFixed(1)); P.fore2.setAttribute('y2', w2[1].toFixed(1));
+      P.hand2.setAttribute('transform', `translate(${w2[0].toFixed(1)} ${w2[1].toFixed(1)})`);
+    }
     if (this.gunFall && now > this.gunFall) {
       // the gun falls out of the hand
       const k = Math.min(1, (now - this.gunFall) / 900);
       if (!this.fallFrom) this.fallFrom = w.slice();
-      P.hand.setAttribute('transform', `translate(${(this.fallFrom[0] + 40 * k).toFixed(1)} ${(this.fallFrom[1] + 430 * k * k).toFixed(1)}) rotate(${(180 + 300 * k).toFixed(1)}) scale(1 -1)`);
+      P.hand.setAttribute('transform', `translate(${(this.fallFrom[0] + 40 * k).toFixed(1)} ${(this.fallFrom[1] + 430 * k * k).toFixed(1)}) rotate(${(S.a + 300 * k).toFixed(1)}) scale(1 -1)`);
     } else P.hand.setAttribute('transform', handTf(w, arm.ang));
     P.flash.setAttribute('transform', `translate(${arm.m[0].toFixed(1)} ${arm.m[1].toFixed(1)})`);
     if (this.flashAt) {
@@ -421,10 +462,10 @@ export class Actor {
       P.flash.setAttribute('transform', `translate(${arm.m[0].toFixed(1)} ${arm.m[1].toFixed(1)}) scale(${(0.6 + Math.min(1, k) * 1.4).toFixed(2)})`);
       if (k >= 1) this.flashAt = 0;
     }
-    const tilt = -this.trig * 6 - this.headKick * 30 + this.slump * 10;
+    const tilt = -this.trig * 6 + this.headKick * S.kick[2] + this.slump * 10;
     if (this.headKick) this.headKick = Math.max(0.55, this.headKick - dt * 0.3);
     if (this.slump) this.slump = Math.max(0, this.slump - dt * 0.35);
-    P.head.setAttribute('transform', `rotate(${tilt.toFixed(2)} ${HEAD[0]} 182) translate(${(-this.headKick * 12).toFixed(1)} 0)`);
+    P.head.setAttribute('transform', `rotate(${tilt.toFixed(2)} ${HEAD[0]} 182) translate(${(this.headKick * S.kick[0]).toFixed(1)} ${(this.headKick * S.kick[1]).toFixed(1)})`);
     // dead: the knees go (legs fold down to the floor), the body drops and keels over
     if (this.drop) {
       P.legs.setAttribute('transform', `translate(0 ${(660 * 0.45 * this.drop).toFixed(1)}) scale(1 ${(1 - 0.45 * this.drop).toFixed(3)})`);

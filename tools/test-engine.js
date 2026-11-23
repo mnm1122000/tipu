@@ -232,6 +232,15 @@ for (let n = 2; n <= MAX_PLAYERS; n++) {
       for (const q of s.players) ok(q.bullets >= 1 && q.bullets <= 5, 'bullets in range');
     }
     ok(s.phase === 'over' && s.winner && g.alive().length === 1, `game ends (n=${n})`);
+    {
+      // highlight stats add up
+      const sum = (k) => s.players.reduce((a, q) => a + q.st[k], 0);
+      ok(sum('callsRight') + sum('wrongCalls') === sum('calls'), 'every call is right or wrong');
+      ok(sum('callsRight') === sum('caughtN') && sum('wrongCalls') === sum('honestN'), 'calls match caught / honest');
+      ok(sum('kills') <= s.deaths.length, 'kills never exceed deaths');
+      ok(sum('liesFree') <= sum('lies'), 'free lies are a subset of lies');
+      ok(s.players.every((q) => q.st.clicks + (q.alive ? 0 : 1) === q.pulls), 'every pull is a click or the death');
+    }
     ok(s.deaths.length === n - 1, 'deaths recorded');
     games++; rounds += s.round; maxRounds = Math.max(maxRounds, s.round);
     stats[n] = (stats[n] || 0) + s.round;

@@ -77,6 +77,9 @@ export function buildDeck(n, devil = false, noJoker = false) {
 }
 // a card is "true" for the claim if it is the table card, a Joker, or the Devil
 export const isTrue = (c, table) => c.r === table || c.r === 'J' || c.r === 'D';
+// match stats for the end-of-game highlights
+const blankStats = () => ({ lies: 0, liesFree: 0, truths: 0, calls: 0, callsRight: 0, wrongCalls: 0, caughtN: 0, honestN: 0, wrongReads: 0, clicks: 0, kills: 0, cards: 0 });
+const st = (q) => q.st || (q.st = blankStats());
 
 export function bulletsFor(settings, startCount) {
   if (settings.bullets === 'auto') return startCount >= 7 ? 2 : 1;
@@ -257,7 +260,7 @@ export class Game {
     s.bulletsEach = bulletsFor(s.settings, s.startCount);
     for (const p of s.players) {
       p.alive = true; p.hand = []; p.pulls = 0; p.reads = 0; p.bets = 0;
-      p.bullets = s.bulletsEach; p.honest = 0; p.caught = 0; p.goodReads = 0;
+      p.bullets = s.bulletsEach; p.honest = 0; p.caught = 0; p.goodReads = 0; p.st = blankStats();
     }
     s.round = 0; s.deaths = []; s.winner = null; s.log = [];
     s.starter = s.players[rnd(s.players.length)].id;
@@ -308,6 +311,12 @@ export class Game {
     if (cards.length !== ids.length || cards.some((c) => !c)) return { ok: false, error: 'You do not have those cards.' };
     if (cards.some((c) => c.r === 'D') && cards.length > 1) return { ok: false, error: 'The Devil card must be played alone.' };
     me.hand = me.hand.filter((c) => !uniq.includes(c.id));
+    // the play before this one was never called: if it was a lie, it got away
+    const prev = s.lastPlay;
+    if (prev && prev.cards.some((c) => !isTrue(c, s.table)) && this.p(prev.by)) st(this.p(prev.by)).liesFree++;
+    const ms = st(me);
+    ms.cards += cards.length;
+    if (cards.some((c) => !isTrue(c, s.table))) ms.lies++; else ms.truths++;
     s.pile += cards.length;
     s.lastPlay = { by: pid, cards, n: cards.length };
     this.log(`${me.name}: "${cards.length} ${cards.length > 1 ? RANK_PLURAL[s.table] : RANK_NAME[s.table]}"`);
@@ -341,6 +350,9 @@ export class Game {
     if (!lp || lp.by === pid) return { ok: false, error: 'Nothing to call yet.' };
     const lie = lp.cards.some((c) => !isTrue(c, s.table));
     const devil = lp.cards.some((c) => c.r === 'D');
+    const cs = st(this.p(pid)), ts = st(this.p(lp.by));
+    cs.calls++;
+    if (lie) { cs.callsRight++; ts.caughtN++; } else { cs.wrongCalls++; ts.honestN++; }
     s.phase = 'reveal';
     s.reveal = { caller: pid, target: lp.by, cards: lp.cards, n: lp.n, lie, devil, bets: {}, stage: 'bet', until: now };
     const bet = this.bettors().length > 0;
@@ -366,8 +378,9 @@ export class Game {
       me.alive = false;
       me.hand = [];
       s.deaths.push(pid);
+      if (g.by && g.by !== pid && this.p(g.by)) st(this.p(g.by)).kills++;
       this.log(`💥 ${me.name} is dead`);
-    } else this.log(`*click* ${me.name} lives`);
+    } else { st(me).clicks++; this.log(`*click* ${me.name} lives`); }
     this.emit({ type: 'shot', pid, dead, pull: me.pulls, auto });
     if (g.shooters.every((id) => id in g.done)) g.until = now + AFTER_SHOT_MS;
     return { ok: true };
@@ -405,7 +418,10 @@ export class Game {
           if (pick === right) {
             q.reads++;
             if (q.alive) { q.goodReads = (q.goodReads || 0) + 1; if (q.goodReads >= READ_STREAK) { q.goodReads = 0; if (q.bullets > MIN_BULLETS) { q.bullets--; down.push(id); } } }
-          } else if (q.alive && q.bullets < MAX_BULLETS) { q.bullets++; up.push(id); }
+          } else {
+            st(q).wrongReads++;
+            if (q.alive && q.bullets < MAX_BULLETS) { q.bullets++; up.push(id); }
+          }
         }
         r.readChanges = { up, down };
         this.emit({ type: 'flip', cards: r.cards, lie: r.lie, devil: r.devil, target: r.target, caller: r.caller, bets: r.bets });
@@ -446,7 +462,8 @@ export class Game {
       if (r.stage === 'verdict') {
         s.phase = 'gun';
         for (const id of r.shooters) { const q = this.p(id); q.live = rnd(CHAMBERS) < q.bullets; }
-        s.gun = { shooters: r.shooters, done: {}, until: now + GUN_MS, devil: r.devil };
+        // who sent them to the gun: the caller who caught a liar, or the honest player who was wrongly called
+        s.gun = { shooters: r.shooters, done: {}, until: now + GUN_MS, devil: r.devil, by: r.devil ? r.target : r.lie ? r.caller : r.target };
         this.emit({ type: 'gun', shooters: r.shooters });
         return true;
       }
@@ -507,7 +524,7 @@ export class Game {
       winner: s.winner, deaths: s.deaths,
       players: s.players.map((q) => ({
         id: q.id, name: q.name, emoji: q.emoji, bot: q.bot, alive: q.alive, count: q.hand.length,
-        pulls: q.pulls, reads: q.reads, bets: q.bets, outfit: q.outfit, gun: q.gun, bullets: q.bullets, honest: q.honest, caught: q.caught, goodReads: q.goodReads || 0, idle: q.idle || 0,
+        pulls: q.pulls, reads: q.reads, bets: q.bets, outfit: q.outfit, gun: q.gun, bullets: q.bullets, honest: q.honest, caught: q.caught, goodReads: q.goodReads || 0, idle: q.idle || 0, st: q.st || blankStats(),
       })),
       me: {
         hand: me.hand,

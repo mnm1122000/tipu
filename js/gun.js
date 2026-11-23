@@ -5,7 +5,7 @@
 //   4. press the trigger and pull it back until it breaks
 //   5. BANG or *click*
 // Everyone else sees a live mirror of the same gun (spin, hammer and trigger streamed ~10×/s).
-import { sfx, vibrate } from './sfx.js?v=6';
+import { sfx, vibrate } from './sfx.js?v=7';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

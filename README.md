@@ -38,9 +38,14 @@ Your profile photo becomes the character's whole head. After picking or taking a
 
    The gun only appears on the shooter's phone. Everyone else watches the shooter as a **character in a spotlight with their profile picture as the face**, standing in the outfit they picked in the wardrobe, holding the revolver they picked, raising the revolver to the temple, sweating and shaking harder as the real trigger tightens, then **BANG** (flash, splatter, the body slumps, a ghost rises) or ***click*** (relief).
 
+   Every shot gets one of **5 poses** (the same on every phone): gun to the temple, **left-handed**, **barrel in the mouth**, **both hands under the chin**, or **to the heart**. The blood, the head jolt and the fall follow the pose.
+
    **Odds:** every pull is a fresh spin, so the chance is simply **your bullets in 6**, every time (2 bullets = 2/6). Moving bullets and spinning are for show only.
 8. **Bullets move.** Called a liar while telling the truth **3 times** → **−1 bullet** (never below 1). Caught lying **3 times** → **+1 bullet** (up to 5).
 9. A new round starts with fresh cards. **Last player alive wins.**
+10. **Match highlights** at the end: Sharpest Eye (best bets), Lie Detector (most liars caught), Smooth Liar (most lies nobody called), Worst Poker Face, Honest Soul, Cried Wolf (wrong calls), Lucky Devil (most clicks survived), Grim Reaper (sent most to the grave), Worst Gambler, First Blood and Back Room Champ.
+
+The home screen: flick or tap the cylinder to spin it (1 in 6 goes BANG), tap the title to make it jump. TIPU! is in **beta**, made by mnm.
 
 ## Hidden cards (so nobody can count your hand)
 

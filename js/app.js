@@ -1,12 +1,13 @@
 // TIPU! — app: screens, host loop, client flow, table animations, the reveal and the gun.
-import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK, handSize, hiddenSize } from './engine.js?v=6';
-import { openIdle } from './idle.js?v=6';
-import { openCrop } from './crop.js?v=6';
-import { Actor, OUTFITS, characterSVG } from './actor.js?v=6';
-import { GUNS, sideGunSVG } from './gun.js?v=6';
-import * as net from './net.js?v=6';
-import { sfx, vibrate } from './sfx.js?v=6';
-import { Revolver } from './gun.js?v=6';
+import { Game, MIN_PLAYERS, MAX_PLAYERS, RANK_NAME, RANK_PLURAL, TIMERS, FLIP_MS, BET_MS, oddsNext, deckMix, HAND, TWISTS, STREAK, handSize, hiddenSize } from './engine.js?v=7';
+import { openIdle } from './idle.js?v=7';
+import { openCrop } from './crop.js?v=7';
+import { showSplash, startHomeFx, cylSVG, homeBgHTML, titleHTML } from './home.js?v=7';
+import { Actor, OUTFITS, characterSVG, STYLE_KEYS } from './actor.js?v=7';
+import { GUNS, sideGunSVG } from './gun.js?v=7';
+import * as net from './net.js?v=7';
+import { sfx, vibrate } from './sfx.js?v=7';
+import { Revolver } from './gun.js?v=7';
 
 // ======================================================================
 // utils
@@ -690,6 +691,12 @@ function syncGun(v) {
   const watchId = g.shooters.find((id) => !(id in g.done));
   if (watchId) openGun(watchId, true, v);
 }
+// every phone works out the same pose for this shot (temple, left hand, mouth, two hands under the chin, heart)
+function shotStyle(pid, round, pulls) {
+  let h = 2166136261;
+  for (const c of `${pid}:${round}:${pulls || 0}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  return STYLE_KEYS[(h >>> 0) % STYLE_KEYS.length];
+}
 function openGun(pid, watch, v) {
   const p = P(pid);
   if (!p) return;
@@ -698,6 +705,7 @@ function openGun(pid, watch, v) {
   const r = watch ? new Actor({
     name: p.name, photo: App.avatars[pid] || null, emoji: p.emoji, pulls: p.pulls, bullets: p.bullets || 1,
     outfit: Number.isInteger(p.outfit) ? p.outfit : Math.max(0, v.players.findIndex((q) => q.id === pid)), gun: p.gun,
+    style: shotStyle(pid, v.round, p.pulls),
     extra: multi ? `😈 ${v.gun.shooters.length} guns out: ${v.gun.shooters.map((id) => esc(nameOf(id))).join(', ')}` : '',
     onResult: () => { if (App.gun) App.gun.resultAt = Date.now(); },
   }) : new Revolver({
@@ -778,11 +786,13 @@ function rHome() {
   const last = store.get('last');
   const canResume = saved && Date.now() - saved.savedAt < 6 * 3600e3 && saved.state && saved.state.phase !== 'lobby';
   const canRejoin = last && !last.host && Date.now() - last.at < 6 * 3600e3 && store.get('id_' + last.code);
-  return `<div class="home scroll">
+  return `<div class="home scroll">${homeBgHTML()}
     <div class="logo-wrap">
-      <div class="logo-gun">${logoSVG()}</div>
-      <div class="logo-title">TIPU!</div>
+      <div class="logo-gun" title="Spin me">${logoSVG()}</div>
+      <div class="logo-res"></div>
+      <div class="logo-tw"><div class="logo-title">${titleHTML()}</div><span class="beta-stamp">BETA</span></div>
       <div class="tagline">Lie with a straight face. Get caught, pull the trigger.</div>
+      <div class="small hint-spin">👆 flick the cylinder</div>
     </div>
     ${canResume ? `<button class="btn primary block big" data-act="resumeHost">▶ Resume hosting ${esc(saved.code)}</button>` : ''}
     ${canRejoin && !code ? `<button class="btn blue block" data-act="rejoin">↩ Rejoin table ${esc(last.code)}</button>` : ''}
@@ -811,14 +821,10 @@ function rHome() {
       <div class="small" style="margin-top:8px">Or scan the QR code on the host's phone.</div>
     </div>`}
     <div class="row" style="margin-top:12px"><button class="btn ghost" data-act="rules">📖 Rules</button><button class="btn ghost" data-act="testSound">🔊 Sound</button><button class="btn ghost" data-act="tryGun">🔫 Try the gun</button></div>
-    <div class="made">Made by mnm <span class="beta">BETA</span></div>
+    <div class="made">TIPU! <span class="beta">BETA</span> · made by <b>mnm</b></div>
   </div>`;
 }
-function logoSVG() {
-  return `<svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" fill="#1a1012" stroke="#c9a24a" stroke-width="4"/>
-    ${[0, 1, 2, 3, 4, 5].map((k) => { const a = (k * 60 - 90) * Math.PI / 180; return `<circle cx="${60 + 30 * Math.cos(a)}" cy="${60 + 30 * Math.sin(a)}" r="12" fill="${k === 0 ? '#e8394a' : '#0a0607'}" stroke="#c9a24a" stroke-width="2.5"/>`; }).join('')}
-    <circle cx="60" cy="60" r="8" fill="#c9a24a"/></svg>`;
-}
+const logoSVG = cylSVG;
 
 function rConnecting() {
   return `<div class="connecting"><div class="spinner"></div><div class="brand" style="font-size:20px">${esc(App.screenData.msg || 'Connecting…')}</div>
@@ -826,7 +832,7 @@ function rConnecting() {
 }
 
 function topbar(v, sub) {
-  return `<div class="topbar"><div class="t"><b class="brand">TIPU!</b> <span class="small">· ${esc(v.code)}</span><div class="small">${sub}</div></div>
+  return `<div class="topbar"><div class="t"><b class="brand">TIPU!</b><span class="beta sm">BETA</span> <span class="small">· ${esc(v.code)}</span><div class="small">${sub}</div></div>
     <button class="iconbtn" data-act="mute">${sfx.muted ? '🔇' : '🔊'}</button><button class="iconbtn" data-act="menu">☰</button></div>`;
 }
 
@@ -1107,21 +1113,51 @@ function rOver(v) {
     if (b.id === v.winner) return 1;
     return v.deaths.indexOf(b.id) - v.deaths.indexOf(a.id);
   });
-  const readers = v.players.filter((p) => p.bets > 0).sort((a, b) => b.reads - a.reads || a.bets - b.bets);
-  const best = readers[0] && readers[0].reads > 0 ? readers[0] : null;
+  // highlight cards deal in one by one; a negative delay keeps them in place across repaints
+  const key = v.code + ':' + v.winner + ':' + v.deaths.join(',');
+  if (App.overKey !== key) { App.overKey = key; App.overAt = Date.now(); }
+  const el = (Date.now() - App.overAt) / 1000;
+  const hl = highlights(v);
   return `<div class="game">${topbar(v, 'Last one standing')}
     <div class="scroll">
       <div class="winner">${w ? avHTML(w.id, w.emoji, 'big') : '<div class="big">🏆</div>'}
         <h2>${w ? esc(v.winner === App.me ? 'You survived!' : w.name + ' survived!') : 'Game ended'}</h2>
         <div class="small">${w ? `${w.pulls} trigger pull${w.pulls === 1 ? '' : 's'} and still breathing` : ''}</div>
-        ${best ? `<div class="award">🎯 Sharpest reader: <b>${esc(nameOf(best.id))}</b> · ${best.reads}/${best.bets} calls read right</div>` : ''}</div>
+</div>
+      ${hl.length ? `<h3 class="hl-h">🎬 Match highlights</h3><div class="hl-grid">${hl.map((h, i) => `<div class="hl ${h.pid === App.me ? 'me' : ''}" style="animation-delay:${(0.5 + i * 0.32 - el).toFixed(2)}s">
+        <div class="hl-ic">${h.icon}</div><div class="hl-t">${h.title}</div>${avHTML(h.pid, P(h.pid)?.emoji, 'hl-av')}<b>${esc(h.pid === App.me ? 'You' : nameOf(h.pid))}</b><div class="hl-l">${h.line}</div></div>`).join('')}</div>` : ''}
       ${order.map((p, i) => `<div class="res ${p.id === v.winner ? 'win' : ''}">${avHTML(p.id, p.emoji, 'em')}<div class="info"><b>${i + 1}. ${esc(p.id === App.me ? 'You' : p.name)}</b>
-          <div class="small">${p.id === v.winner ? '🏆 Survivor' : p.alive ? 'Still alive (game ended)' : `💀 Out ${ordinal(v.deaths.indexOf(p.id) + 1)}`} · ${p.pulls} pull${p.pulls === 1 ? '' : 's'}${p.bets ? ` · 🎯 ${p.reads}/${p.bets}` : ''}</div></div></div>`).join('')}
+          <div class="small">${p.id === v.winner ? '🏆 Survivor' : p.alive ? 'Still alive (game ended)' : `💀 Out ${ordinal(v.deaths.indexOf(p.id) + 1)}`} · ${p.pulls} pull${p.pulls === 1 ? '' : 's'}${p.bets ? ` · 🎯 ${p.reads}/${p.bets}` : ''}${p.st ? ` · 🤥 ${p.st.lies} lie${p.st.lies === 1 ? '' : 's'} · 📢 ${p.st.callsRight}/${p.st.calls} calls` : ''}</div></div></div>`).join('')}
     </div>
     <div class="sticky-bottom">${host
       ? '<button class="btn primary block big" data-act="start">🔁 Reload & play again</button><button class="btn ghost block" data-act="toLobby">Back to lobby (let people join)</button>'
-      : '<div class="center-t small" style="padding:12px">Waiting for the host…</div>'}</div>
+      : '<div class="center-t small" style="padding:12px">Waiting for the host…</div>'}<div class="made" style="padding-top:6px">TIPU! <span class="beta">BETA</span> · made by <b>mnm</b></div></div>
   </div>`;
+}
+// end-of-game awards from the match stats: the top player in each category (ties go to whoever did it with fewer chances)
+function highlights(v) {
+  const ps = v.players;
+  const S = (p) => p.st || {};
+  const top = (score, tie = () => 0) => {
+    const best = [...ps].sort((a, b) => score(b) - score(a) || tie(a) - tie(b))[0];
+    return best && score(best) > 0 ? best : null;
+  };
+  const x = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const out = [];
+  const add = (p, icon, title, line) => { if (p) out.push({ pid: p.id, icon, title, line }); };
+  let p;
+  p = top((q) => q.reads, (q) => q.bets); add(p, '🎯', 'Sharpest Eye', p && `${p.reads}/${p.bets} bets read right`);
+  p = top((q) => S(q).callsRight, (q) => S(q).calls); add(p, '🕵️', 'Lie Detector', p && `caught ${x(S(p).callsRight, 'liar', 'liars')} with TIPU!`);
+  p = top((q) => S(q).liesFree, (q) => S(q).lies); add(p, '🐍', 'Smooth Liar', p && `${x(S(p).liesFree, 'lie', 'lies')} nobody called`);
+  p = top((q) => S(q).caughtN); add(p, '🤡', 'Worst Poker Face', p && `caught lying ${S(p).caughtN}×`);
+  p = top((q) => S(q).honestN); add(p, '😇', 'Honest Soul', p && `told the truth ${S(p).honestN}× when called`);
+  p = top((q) => S(q).wrongCalls); add(p, '🐺', 'Cried Wolf', p && `${x(S(p).wrongCalls, 'wrong TIPU! call', 'wrong TIPU! calls')}`);
+  p = top((q) => S(q).clicks); add(p, '🍀', 'Lucky Devil', p && `survived ${x(S(p).clicks, 'trigger pull', 'trigger pulls')}`);
+  p = top((q) => S(q).kills); add(p, '⚰️', 'Grim Reaper', p && `sent ${x(S(p).kills, 'player', 'players')} to the grave`);
+  p = top((q) => S(q).wrongReads); add(p, '🎲', 'Worst Gambler', p && `${x(S(p).wrongReads, 'wrong read', 'wrong reads')}`);
+  if (v.deaths[0]) add(P(v.deaths[0]), '🩸', 'First Blood', 'first one out');
+  p = top((q) => q.idle || 0); add(p, '🍾', 'Back Room Champ', p && `${p.idle} bottles in the back room`);
+  return out;
 }
 const ordinal = (n) => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th');
 
@@ -1163,7 +1199,8 @@ function menuSheet() {
     ${host && stuck ? `<button class="btn block" data-act="skipTurn">⏭ ${v.phase === 'gun' ? 'Fire for whoever is stalling' : `Play ${esc(nameOf(v.turn))}'s turn for them`}</button>` : ''}
     ${host && inGame ? '<button class="btn block" data-act="endGame">🏁 End game now</button>' : ''}
     ${host ? '<button class="btn block" style="color:#ff8a8a" data-act="closeTable">✖ Close table for everyone</button>' : '<button class="btn block" style="color:#ff8a8a" data-act="leave">🚪 Leave table</button>'}
-    <button class="btn ghost block" data-act="closeModal">Close</button></div>`);
+    <button class="btn ghost block" data-act="closeModal">Close</button></div>
+    <div class="made">TIPU! <span class="beta">BETA</span> · made by <b>mnm</b></div>`);
 }
 
 function drawQR() {
@@ -1489,4 +1526,6 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
     if (!App.mode || (App.view && ['lobby', 'over'].includes(App.view.phase))) { reloaded = true; location.reload(); }
   });
 }
+startHomeFx();
+if (!new URLSearchParams(location.search).has('auto') && window.top === window) showSplash();
 route();
