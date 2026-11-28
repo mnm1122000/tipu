@@ -8,8 +8,11 @@ export const BROKERS = [
   'wss://broker.emqx.io:8084/mqtt',
   'wss://broker.hivemq.com:8884/mqtt',
   'wss://test.mosquitto.org:8081/mqtt',
+  'wss://mqtt.eclipseprojects.io:443/mqtt', // port 443: gets through networks that block odd ports
 ];
 const PREFIX = 'tipu-liarsgame-v1';
+
+const CLIENT_TAG = 'tp_';
 
 const te = new TextEncoder();
 const td = new TextDecoder();
@@ -56,6 +59,24 @@ export async function unseal(key, { iv, ct }) {
 }
 
 // ---------- MQTT bus ----------
+// Every broker is tried AT THE SAME TIME and the first one that answers wins, so a blocked or
+// dead broker no longer costs 7 seconds each. Indexes in BROKERS must never change order (they
+// go into invite links and saved games), so new brokers are only ever appended.
+function openClient(idx, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const c = mqtt.connect(BROKERS[idx], {
+      clientId: CLIENT_TAG + Math.random().toString(36).slice(2, 12),
+      clean: true, connectTimeout: timeoutMs, reconnectPeriod: 2000, keepalive: 20,
+      protocolVersion: 4,
+    });
+    let done = false;
+    const fail = (e) => { if (done) return; done = true; clearTimeout(timer); try { c.end(true); } catch (_) {} reject(e || new Error('timeout')); };
+    const timer = setTimeout(() => fail(new Error('timeout')), timeoutMs + 500);
+    c.once('connect', () => { if (done) { try { c.end(true); } catch (_) {} return; } done = true; clearTimeout(timer); resolve(c); });
+    c.once('error', (e) => fail(e));
+  });
+}
+
 export class Bus {
   constructor(code) {
     this.code = code;
@@ -66,38 +87,35 @@ export class Bus {
   }
   topic(sub) { return `${PREFIX}/${this.code}/${sub}`; }
 
-  connectTo(idx, timeoutMs = 7000) {
-    return new Promise((resolve, reject) => {
-      const url = BROKERS[idx];
-      const c = mqtt.connect(url, {
-        clientId: 'tp_' + Math.random().toString(36).slice(2, 12),
-        clean: true, connectTimeout: timeoutMs, reconnectPeriod: 2000, keepalive: 20,
-        protocolVersion: 4,
-      });
-      let done = false;
-      const fail = (e) => { if (done) return; done = true; try { c.end(true); } catch (_) {} reject(e || new Error('timeout')); };
-      const timer = setTimeout(() => fail(new Error('timeout')), timeoutMs + 500);
-      c.once('connect', () => {
-        if (done) return; done = true; clearTimeout(timer);
-        this.client = c; this.brokerIdx = idx;
-        c.on('message', (t, payload) => this.dispatch(t, payload));
-        c.on('reconnect', () => this.onStatus('reconnecting'));
-        c.on('offline', () => this.onStatus('offline'));
-        c.on('connect', () => this.onStatus('online'));
-        this.onStatus('online');
-        resolve(idx);
-      });
-      c.once('error', (e) => fail(e));
-    });
+  adopt(c, idx) {
+    this.client = c; this.brokerIdx = idx;
+    c.on('message', (t, payload) => this.dispatch(t, payload));
+    c.on('reconnect', () => this.onStatus('reconnecting'));
+    c.on('offline', () => this.onStatus('offline'));
+    c.on('connect', () => this.onStatus('online'));
+    this.onStatus('online');
+    return idx;
   }
 
-  async connectAny(preferred = 0) {
+  async connectTo(idx, timeoutMs = 7000) {
+    return this.adopt(await openClient(idx, timeoutMs), idx);
+  }
+
+  // Race every broker; keep the first that connects (the preferred one wins ties).
+  connectAny(preferred = 0, timeoutMs = 8000) {
     const order = [preferred, ...BROKERS.map((_, i) => i).filter((i) => i !== preferred)];
-    let last;
-    for (const i of order) {
-      try { return await this.connectTo(i); } catch (e) { last = e; }
-    }
-    throw last || new Error('No broker reachable');
+    return new Promise((resolve, reject) => {
+      let won = false, failed = 0, last;
+      for (const idx of order) {
+        openClient(idx, timeoutMs).then((c) => {
+          if (won) { try { c.end(true); } catch (_) {} return; }
+          won = true; resolve(this.adopt(c, idx));
+        }, (e) => {
+          last = e;
+          if (++failed === order.length && !won) reject(last || new Error('No broker reachable'));
+        });
+      }
+    });
   }
 
   dispatch(t, payload) {
@@ -110,12 +128,17 @@ export class Bus {
     }
   }
 
-  // sub may end with '+' wildcard; handler gets (data, wildcardValue)
+  // sub may end with '+' wildcard; handler gets (data, wildcardValue).
+  // Never hangs: if the broker drops before acknowledging, we carry on after a few seconds
+  // (mqtt.js re-sends the subscription when it reconnects).
   subscribe(sub, fn) {
     const full = this.topic(sub);
     const re = new RegExp('^' + full.replace(/[.*?^${}()|[\]\\]/g, '\\$&').replace('\\+', '([^/]+)').replace('+', '([^/]+)') + '$');
     this.handlers.push({ re, fn });
-    return new Promise((res) => this.client.subscribe(full, { qos: 1 }, () => res()));
+    return new Promise((res) => {
+      const t = setTimeout(res, 4000);
+      try { this.client.subscribe(full, { qos: 1 }, () => { clearTimeout(t); res(); }); } catch (_) { clearTimeout(t); res(); }
+    });
   }
 
   publish(sub, obj, { retain = false, qos = 1 } = {}) {
@@ -128,17 +151,24 @@ export class Bus {
 }
 
 // Find which broker a lobby lives on by looking for its retained "meta" message.
-export async function findLobby(code, preferred = null, waitMs = 3500) {
-  const order = preferred != null ? [preferred, ...BROKERS.map((_, i) => i).filter((i) => i !== preferred)] : BROKERS.map((_, i) => i);
-  for (const idx of order) {
-    const bus = new Bus(code);
-    try { await bus.connectTo(idx, 6000); } catch (_) { continue; }
-    const meta = await new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(null), waitMs);
-      bus.subscribe('meta', (data) => { if (data && data.pub) { clearTimeout(timer); resolve(data); } });
-    });
-    if (meta) return { bus, meta };
-    bus.close();
-  }
-  return null;
+// All brokers are searched at once; the first one holding the lobby wins.
+export function findLobby(code, preferred = null, waitMs = 4000) {
+  const order = preferred != null && BROKERS[preferred] ? [preferred, ...BROKERS.map((_, i) => i).filter((i) => i !== preferred)] : BROKERS.map((_, i) => i);
+  return new Promise((resolve) => {
+    let found = false, pending = order.length;
+    const miss = () => { if (--pending === 0 && !found) resolve(null); };
+    for (const idx of order) {
+      const bus = new Bus(code);
+      bus.connectTo(idx, 6000).then(() => {
+        if (found) { bus.close(); return miss(); }
+        const timer = setTimeout(() => { bus.close(); miss(); }, waitMs);
+        bus.subscribe('meta', (data) => {
+          if (!data || !data.pub) return;
+          clearTimeout(timer);
+          if (found) { bus.close(); return; }
+          found = true; resolve({ bus, meta: data });
+        });
+      }, miss);
+    }
+  });
 }
