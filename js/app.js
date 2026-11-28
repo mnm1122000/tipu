@@ -5,7 +5,7 @@ import { openCrop } from './crop.js?v=7';
 import { showSplash, startHomeFx, cylSVG, homeBgHTML, titleHTML } from './home.js?v=7';
 import { Actor, OUTFITS, characterSVG, STYLE_KEYS } from './actor.js?v=7';
 import { GUNS, sideGunSVG } from './gun.js?v=7';
-import * as net from './net.js?v=9';
+import * as net from './net.js?v=10';
 import { sfx, vibrate } from './sfx.js?v=7';
 import { Revolver } from './gun.js?v=7';
 

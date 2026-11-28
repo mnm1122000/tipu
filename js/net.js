@@ -59,7 +59,9 @@ export async function unseal(key, { iv, ct }) {
 }
 
 // ---------- MQTT bus ----------
-// Players use ONE broker. The host uses ALL the brokers it can reach at once and bridges them:
+// Everyone stays connected to EVERY broker they can reach, so one broker dying mid-game changes
+// nothing; copies of the same message arriving from several brokers are dropped. The host also
+// bridges them:
 // everything the host sends goes out on every broker, and player-to-player topics (photos etc.)
 // are copied across, so a player whose network only reaches one broker still finds the table
 // and sees everyone. Indexes in BROKERS must never change order (they go into invite links and
@@ -91,7 +93,8 @@ export class Bus {
     this.retained = new Map(); // full topic -> payload, replayed on brokers that connect later
     this.seen = new Map();    // topic\npayload -> { idx, t }: drops copies echoed back by other brokers
     this.brokerIdx = -1;
-    this.bridge = false;
+    this.bridge = false;      // host: copy player-to-player topics between brokers
+    this.multi = false;       // connected (or connecting) to several brokers
     this.closed = false;
     this.status = null;
     this.onStatus = () => {};
@@ -139,7 +142,7 @@ export class Bus {
   // Host: connect to EVERY broker. Resolves as soon as one is up; the rest join in the
   // background and brokers that failed are retried every 30 s.
   connectAll(preferred = 0, timeoutMs = 8000) {
-    this.bridge = true;
+    this.bridge = true; this.multi = true;
     const order = [preferred, ...BROKERS.map((_, i) => i).filter((i) => i !== preferred)];
     this.subscribeRaw(this.topic('av/+')); this.subscribeRaw(this.topic('rv/+')); this.subscribeRaw(this.topic('gh/+'));
     return new Promise((resolve, reject) => {
@@ -159,14 +162,25 @@ export class Bus {
     });
   }
 
+  // Player: after finding the table on one broker, also connect to all the others in the
+  // background (retrying every 30 s), so the game survives that broker going down.
+  joinRest(timeoutMs = 8000) {
+    this.multi = true;
+    const tryOne = (idx) => {
+      if (this.closed || this.clients.has(idx)) return;
+      openClient(idx, timeoutMs).then((c) => this.adopt(c, idx), () => { if (!this.closed) setTimeout(() => tryOne(idx), 30000); });
+    };
+    BROKERS.forEach((_, i) => tryOne(i));
+  }
+
   onMessage(idx, t, payload, pkt) {
     const str = payload && payload.length ? td.decode(payload) : '';
-    if (this.bridge) {
+    if (this.multi) {
       const key = t + '\n' + str, now = Date.now(), s = this.seen.get(key);
       if (s && s.idx !== idx && now - s.t < 8000) return; // our own copy coming back from another broker
       this.seen.set(key, { idx, t: now });
       if (this.seen.size > 400) for (const [k, v] of this.seen) if (now - v.t > 8000) this.seen.delete(k);
-      if (RELAY.test(t)) {
+      if (this.bridge && RELAY.test(t)) {
         const retain = !!(pkt && pkt.retain) || /\/av\/[^/]+$/.test(t); // photos are always retained (brokers clear the flag on live delivery)
         if (retain) { if (str) this.retained.set(t, str); else this.retained.delete(t); }
         for (const [i, c] of this.clients) if (i !== idx) c.publish(t, str, { qos: retain ? 1 : 0, retain });
@@ -208,7 +222,7 @@ export class Bus {
     const payload = obj == null ? '' : JSON.stringify(obj);
     if (retain) { if (payload) this.retained.set(t, payload); else this.retained.delete(t); }
     for (const c of this.clients.values()) c.publish(t, payload, { qos, retain });
-    if (this.bridge) { // deliver our own copy once, drop the echoes from every broker
+    if (this.multi) { // deliver our own copy once, drop the echoes from every broker
       this.seen.set(t + '\n' + payload, { idx: -1, t: Date.now() });
       setTimeout(() => this.dispatch(t, payload), 0);
     }
@@ -238,7 +252,7 @@ export function findLobby(code, preferred = null, waitMs = 4000) {
           if (seen || !data || !data.pub) return;
           seen = true; clearTimeout(timer);
           if (found) { bus.close(); return miss(); }
-          found = true; resolve({ bus, meta: data });
+          found = true; bus.joinRest(); resolve({ bus, meta: data });
         });
       }, miss);
     }
