@@ -59,9 +59,13 @@ export async function unseal(key, { iv, ct }) {
 }
 
 // ---------- MQTT bus ----------
-// Every broker is tried AT THE SAME TIME and the first one that answers wins, so a blocked or
-// dead broker no longer costs 7 seconds each. Indexes in BROKERS must never change order (they
-// go into invite links and saved games), so new brokers are only ever appended.
+// Players use ONE broker. The host uses ALL the brokers it can reach at once and bridges them:
+// everything the host sends goes out on every broker, and player-to-player topics (photos etc.)
+// are copied across, so a player whose network only reaches one broker still finds the table
+// and sees everyone. Indexes in BROKERS must never change order (they go into invite links and
+// saved games), so new brokers are only ever appended.
+const RELAY = /\/(av|rv|gh)\/[^/]+$/; // player-to-player topics the host copies between brokers
+
 function openClient(idx, timeoutMs) {
   return new Promise((resolve, reject) => {
     const c = mqtt.connect(BROKERS[idx], {
@@ -80,20 +84,34 @@ function openClient(idx, timeoutMs) {
 export class Bus {
   constructor(code) {
     this.code = code;
-    this.client = null;
+    this.client = null;      // first broker (players: the only one)
+    this.clients = new Map(); // idx -> mqtt client
     this.handlers = [];
+    this.subs = new Set();    // full topics, replayed on brokers that connect later
+    this.retained = new Map(); // full topic -> payload, replayed on brokers that connect later
+    this.seen = new Map();    // topic\npayload -> { idx, t }: drops copies echoed back by other brokers
     this.brokerIdx = -1;
+    this.bridge = false;
+    this.closed = false;
+    this.status = null;
     this.onStatus = () => {};
   }
   topic(sub) { return `${PREFIX}/${this.code}/${sub}`; }
 
+  emitStatus() {
+    const s = [...this.clients.values()].some((c) => c.connected) ? 'online' : 'reconnecting';
+    if (s !== this.status) { this.status = s; this.onStatus(s); }
+  }
+
   adopt(c, idx) {
-    this.client = c; this.brokerIdx = idx;
-    c.on('message', (t, payload) => this.dispatch(t, payload));
-    c.on('reconnect', () => this.onStatus('reconnecting'));
-    c.on('offline', () => this.onStatus('offline'));
-    c.on('connect', () => this.onStatus('online'));
-    this.onStatus('online');
+    if (this.closed) { try { c.end(true); } catch (_) {} return idx; }
+    this.clients.set(idx, c);
+    if (!this.client) { this.client = c; this.brokerIdx = idx; }
+    c.on('message', (t, payload, pkt) => this.onMessage(idx, t, payload, pkt));
+    for (const ev of ['reconnect', 'offline', 'close', 'connect']) c.on(ev, () => this.emitStatus());
+    for (const t of this.subs) c.subscribe(t, { qos: 1 });
+    for (const [t, p] of this.retained) c.publish(t, p, { qos: 1, retain: true });
+    this.emitStatus();
     return idx;
   }
 
@@ -101,7 +119,7 @@ export class Bus {
     return this.adopt(await openClient(idx, timeoutMs), idx);
   }
 
-  // Race every broker; keep the first that connects (the preferred one wins ties).
+  // Race every broker; keep the first that connects (players).
   connectAny(preferred = 0, timeoutMs = 8000) {
     const order = [preferred, ...BROKERS.map((_, i) => i).filter((i) => i !== preferred)];
     return new Promise((resolve, reject) => {
@@ -118,9 +136,47 @@ export class Bus {
     });
   }
 
-  dispatch(t, payload) {
-    let data = null;
+  // Host: connect to EVERY broker. Resolves as soon as one is up; the rest join in the
+  // background and brokers that failed are retried every 30 s.
+  connectAll(preferred = 0, timeoutMs = 8000) {
+    this.bridge = true;
+    const order = [preferred, ...BROKERS.map((_, i) => i).filter((i) => i !== preferred)];
+    this.subscribeRaw(this.topic('av/+')); this.subscribeRaw(this.topic('rv/+')); this.subscribeRaw(this.topic('gh/+'));
+    return new Promise((resolve, reject) => {
+      let first = false, failed = 0, last;
+      const tryOne = (idx, initial) => {
+        if (this.closed || this.clients.has(idx)) return;
+        openClient(idx, timeoutMs).then((c) => {
+          this.adopt(c, idx);
+          if (!first) { first = true; resolve(idx); }
+        }, (e) => {
+          last = e;
+          if (initial && ++failed === order.length && !first) { reject(last || new Error('No broker reachable')); return; }
+          if (!this.closed) setTimeout(() => tryOne(idx, false), 30000);
+        });
+      };
+      for (const idx of order) tryOne(idx, true);
+    });
+  }
+
+  onMessage(idx, t, payload, pkt) {
     const str = payload && payload.length ? td.decode(payload) : '';
+    if (this.bridge) {
+      const key = t + '\n' + str, now = Date.now(), s = this.seen.get(key);
+      if (s && s.idx !== idx && now - s.t < 8000) return; // our own copy coming back from another broker
+      this.seen.set(key, { idx, t: now });
+      if (this.seen.size > 400) for (const [k, v] of this.seen) if (now - v.t > 8000) this.seen.delete(k);
+      if (RELAY.test(t)) {
+        const retain = !!(pkt && pkt.retain) || /\/av\/[^/]+$/.test(t); // photos are always retained (brokers clear the flag on live delivery)
+        if (retain) { if (str) this.retained.set(t, str); else this.retained.delete(t); }
+        for (const [i, c] of this.clients) if (i !== idx) c.publish(t, str, { qos: retain ? 1 : 0, retain });
+      }
+    }
+    this.dispatch(t, str);
+  }
+
+  dispatch(t, str) {
+    let data = null;
     if (str) { try { data = JSON.parse(str); } catch (_) { return; } }
     for (const h of this.handlers) {
       const m = h.re.exec(t);
@@ -128,26 +184,41 @@ export class Bus {
     }
   }
 
-  // sub may end with '+' wildcard; handler gets (data, wildcardValue).
-  // Never hangs: if the broker drops before acknowledging, we carry on after a few seconds
-  // (mqtt.js re-sends the subscription when it reconnects).
+  subscribeRaw(full) {
+    this.subs.add(full);
+    const acks = [...this.clients.values()].map((c) => new Promise((res) => {
+      const tm = setTimeout(res, 4000);
+      try { c.subscribe(full, { qos: 1 }, () => { clearTimeout(tm); res(); }); } catch (_) { clearTimeout(tm); res(); }
+    }));
+    // Never hangs: if a broker drops before acknowledging we carry on (mqtt.js re-subscribes on reconnect).
+    return acks.length ? Promise.race(acks) : Promise.resolve();
+  }
+
+  // sub may end with '+' wildcard; handler gets (data, wildcardValue)
   subscribe(sub, fn) {
     const full = this.topic(sub);
     const re = new RegExp('^' + full.replace(/[.*?^${}()|[\]\\]/g, '\\$&').replace('\\+', '([^/]+)').replace('+', '([^/]+)') + '$');
     this.handlers.push({ re, fn });
-    return new Promise((res) => {
-      const t = setTimeout(res, 4000);
-      try { this.client.subscribe(full, { qos: 1 }, () => { clearTimeout(t); res(); }); } catch (_) { clearTimeout(t); res(); }
-    });
+    return this.subscribeRaw(full);
   }
 
   publish(sub, obj, { retain = false, qos = 1 } = {}) {
-    if (!this.client) return;
+    if (!this.clients.size) return;
+    const t = this.topic(sub);
     const payload = obj == null ? '' : JSON.stringify(obj);
-    this.client.publish(this.topic(sub), payload, { qos, retain });
+    if (retain) { if (payload) this.retained.set(t, payload); else this.retained.delete(t); }
+    for (const c of this.clients.values()) c.publish(t, payload, { qos, retain });
+    if (this.bridge) { // deliver our own copy once, drop the echoes from every broker
+      this.seen.set(t + '\n' + payload, { idx: -1, t: Date.now() });
+      setTimeout(() => this.dispatch(t, payload), 0);
+    }
   }
 
-  close() { try { this.client && this.client.end(true); } catch (_) {} this.client = null; }
+  close() {
+    this.closed = true;
+    for (const c of this.clients.values()) { try { c.end(true); } catch (_) {} }
+    this.clients.clear(); this.client = null;
+  }
 }
 
 // Find which broker a lobby lives on by looking for its retained "meta" message.
@@ -162,10 +233,11 @@ export function findLobby(code, preferred = null, waitMs = 4000) {
       bus.connectTo(idx, 6000).then(() => {
         if (found) { bus.close(); return miss(); }
         const timer = setTimeout(() => { bus.close(); miss(); }, waitMs);
+        let seen = false; // later meta updates (e.g. the game starting) must not touch this bus again
         bus.subscribe('meta', (data) => {
-          if (!data || !data.pub) return;
-          clearTimeout(timer);
-          if (found) { bus.close(); return; }
+          if (seen || !data || !data.pub) return;
+          seen = true; clearTimeout(timer);
+          if (found) { bus.close(); return miss(); }
           found = true; resolve({ bus, meta: data });
         });
       }, miss);

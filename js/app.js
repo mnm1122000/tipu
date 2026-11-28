@@ -5,7 +5,7 @@ import { openCrop } from './crop.js?v=7';
 import { showSplash, startHomeFx, cylSVG, homeBgHTML, titleHTML } from './home.js?v=7';
 import { Actor, OUTFITS, characterSVG, STYLE_KEYS } from './actor.js?v=7';
 import { GUNS, sideGunSVG } from './gun.js?v=7';
-import * as net from './net.js?v=8';
+import * as net from './net.js?v=9';
 import { sfx, vibrate } from './sfx.js?v=7';
 import { Revolver } from './gun.js?v=7';
 
@@ -152,7 +152,7 @@ async function hostCreate() {
   App.hostKeys = await net.genKeys();
   App.game = Game.create(App.code, { id: App.me, name: App.profile.name, emoji: App.profile.emoji, ...myLook() });
   App.bus = new net.Bus(App.code);
-  await App.bus.connectAny(0);
+  await App.bus.connectAll(0);
   await hostWire();
 }
 async function hostResume(saved) {
@@ -160,7 +160,7 @@ async function hostResume(saved) {
   App.code = saved.code; App.me = saved.me; App.hostKeys = saved.hostKeys; App.pubs = saved.pubs || {};
   App.game = new Game(saved.state);
   App.bus = new net.Bus(App.code);
-  try { await App.bus.connectTo(saved.broker ?? 0); } catch (_) { await App.bus.connectAny(0); }
+  await App.bus.connectAll(saved.broker ?? 0);
   await hostWire();
 }
 async function hostWire() {
